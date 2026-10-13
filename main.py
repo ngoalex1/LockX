@@ -56,7 +56,7 @@ def supabase_status() -> str:
         return "not_configured"
     try:
         response = httpx.get(
-            f"{project_url.rstrip('/')}/rest/v1/watch_cases?select=id&limit=1",
+            f"{project_url.rstrip('/')}/rest/v1/",
             headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
             timeout=5.0,
         )
