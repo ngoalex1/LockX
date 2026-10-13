@@ -7,9 +7,16 @@ from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
 app = FastAPI(title="LockX Recovery API", version="0.2.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://lockx.ai", "https://www.lockx.ai"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 class CaseStatus(str, Enum):
     monitoring = "monitoring"
@@ -45,8 +52,30 @@ class EvidenceOut(BaseModel):
     captured_at: datetime
     retention: str = "immutable"
 
-_cases: dict[str, CaseOut] = {}
 _matches: dict[str, dict] = {}
+
+def supabase_request(method: str, path: str, *, payload: dict | None = None) -> httpx.Response:
+    project_url = os.getenv("SUPABASE_URL")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not project_url or not service_key:
+        raise HTTPException(503, "Case storage is not configured")
+    try:
+        response = httpx.request(
+            method,
+            f"{project_url.rstrip('/')}/rest/v1/{path.lstrip('/')}",
+            headers={
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            },
+            json=payload,
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        return response
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, "Case storage is temporarily unavailable") from exc
 
 def supabase_status() -> str:
     """Verify Railway can reach Supabase without exposing server credentials."""
@@ -72,24 +101,33 @@ def health() -> dict:
 
 @app.post("/api/v1/cases", response_model=CaseOut, status_code=status.HTTP_201_CREATED)
 def create_case(payload: CaseCreate) -> CaseOut:
-    case = CaseOut(id=str(uuid4()), status=CaseStatus.monitoring, created_at=datetime.now(timezone.utc), **payload.model_dump())
-    _cases[case.id] = case
-    return case
+    case = {
+        "id": str(uuid4()),
+        "brand": payload.brand,
+        "model": payload.model,
+        "reference": payload.reference,
+        "serial_number": payload.serial_number,
+        "distinctive_details": payload.distinctive_details,
+        "status": CaseStatus.monitoring.value,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    response = supabase_request("POST", "watch_cases", payload=case)
+    return CaseOut(**response.json()[0])
 
 @app.get("/api/v1/cases", response_model=list[CaseOut])
 def list_cases() -> list[CaseOut]:
-    return list(_cases.values())
+    response = supabase_request(
+        "GET",
+        "watch_cases?select=id,brand,model,reference,serial_number,distinctive_details,status,created_at&order=created_at.desc",
+    )
+    return [CaseOut(**row) for row in response.json()]
 
 @app.post("/api/v1/cases/{case_id}/scan", status_code=status.HTTP_202_ACCEPTED)
 def request_scan(case_id: str) -> dict:
-    if case_id not in _cases:
-        raise HTTPException(404, "Recovery case not found")
     return {"job_id": str(uuid4()), "case_id": case_id, "status": "queued", "access_policy": "approved_sources_only"}
 
 @app.get("/api/v1/cases/{case_id}/matches")
 def list_matches(case_id: str) -> list[dict]:
-    if case_id not in _cases:
-        raise HTTPException(404, "Recovery case not found")
     return [match for match in _matches.values() if match["case_id"] == case_id]
 
 @app.post("/api/v1/matches/{match_id}/decision")
