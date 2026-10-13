@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0e10" />
+    <title>LockX — Recovery Command Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#dashboard" aria-label="LockX dashboard">
+          <span class="brand-mark"><i></i><i></i><i></i></span><span>lock<span>x</span></span>
+        </a>
+        <nav class="main-nav" aria-label="Primary navigation">
+          <button class="nav-item active" data-page="dashboard"><span class="nav-icon">⌂</span>Overview</button>
+          <button class="nav-item" data-page="cases"><span class="nav-icon">◫</span>My cases <b id="caseCount">03</b></button>
+          <button class="nav-item" data-page="matches"><span class="nav-icon">◌</span>Potential matches <b class="alert-badge">07</b></button>
+          <button class="nav-item" data-page="alerts"><span class="nav-icon">♢</span>Alerts</button>
+          <div class="nav-label">Workspace</div>
+          <button class="nav-item" data-page="monitoring"><span class="nav-icon">◴</span>Monitoring</button>
+          <button class="nav-item" data-page="sources"><span class="nav-icon">⌘</span>Sources</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="secure-note"><span>✦</span><p><strong>Evidence secured</strong><br />Every finding is time-stamped and hashed.</p></div>
+          <button class="profile"><span class="avatar">JV</span><span>Julian Vale<small>Personal account</small></span><span class="more">•••</span></button>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <button class="mobile-menu" aria-label="Open menu">☰</button>
+          <div class="crumb">Command center <span>/</span> <strong id="pageName">Overview</strong></div>
+          <div class="top-actions"><button class="icon-button notification" data-page="alerts" aria-label="Alerts">♢<i></i></button><button class="help">?</button></div>
+        </header>
+
+        <section id="dashboard" class="page active">
+          <div class="page-heading"><div><p class="eyebrow">Monday, September 15</p><h1>Good evening, Julian.</h1><p class="intro">Your watches are being monitored across <strong>14 verified sources.</strong></p></div><button class="primary-button" id="newCaseBtn"><span>+</span> Report a stolen watch</button></div>
+
+          <div class="status-banner"><div class="pulse"><span></span></div><div><strong>Monitoring is active</strong><p>Last scan completed 8 minutes ago · Next scan begins in 52 min</p></div><button data-page="monitoring">View activity <span>→</span></button></div>
+
+          <div class="metric-grid">
+            <article class="metric"><span class="metric-icon case-icon">◫</span><p>Active cases</p><strong>03</strong><small><i></i> All actively monitored</small></article>
+            <article class="metric clickable" data-page="matches"><span class="metric-icon match-icon">◌</span><p>Potential matches</p><strong>07</strong><small class="warm"><i></i> 2 require your review</small></article>
+            <article class="metric"><span class="metric-icon scan-icon">⌁</span><p>Listings scanned</p><strong>2,841</strong><small>In the last 30 days</small></article>
+            <article class="metric"><span class="metric-icon evidence-icon">✦</span><p>Evidence captured</p><strong>19</strong><small>Verified source records</small></article>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="panel case-panel"><div class="panel-head"><div><h2>Your active cases</h2><p>Monitoring status and latest activity</p></div><button class="text-button" data-page="cases">View all <span>→</span></button></div>
+              <div class="case-list" id="dashCases"></div>
+            </section>
+            <section class="panel match-panel"><div class="panel-head"><div><h2>Needs your attention <em>2</em></h2><p>Potential matches with high confidence</p></div><button class="text-button" data-page="matches">Review <span>→</span></button></div>
+              <div class="match-preview" id="dashMatches"></div>
+            </section>
+          </div>
+          <section class="panel activity-panel"><div class="panel-head"><div><h2>Recent monitoring activity</h2><p>Latest events across all of your cases</p></div><button class="text-button" data-page="monitoring">See all activity <span>→</span></button></div><div class="activity-list" id="activityList"></div></section>
+        </section>
+
+        <section id="cases" class="page">
+          <div class="page-heading compact"><div><p class="eyebrow">CASE MANAGEMENT</p><h1>Your cases</h1><p class="intro">A protected record of the watches you’re looking for.</p></div><button class="primary-button" id="newCaseBtn2"><span>+</span> New case</button></div>
+          <div class="filter-row"><button class="filter active">All cases <b>3</b></button><button class="filter">Monitoring <b>2</b></button><button class="filter">Paused <b>1</b></button><div class="search">⌕ <input placeholder="Search cases" /></div></div>
+          <div class="case-cards" id="caseCards"></div>
+        </section>
+
+        <section id="matches" class="page">
+          <div class="page-heading compact"><div><p class="eyebrow">CANDIDATE REVIEW</p><h1>Potential matches <span class="count-pill">07</span></h1><p class="intro">Review findings before taking action. Evidence is retained for every result.</p></div><button class="primary-button ghost" data-page="sources">Manage sources <span>→</span></button></div>
+          <div class="filter-row"><button class="filter active">All findings</button><button class="filter">High confidence <b>2</b></button><button class="filter">Under review <b>3</b></button><button class="filter">Dismissed</button><div class="search">⌕ <input placeholder="Search listings" /></div></div>
+          <div class="match-table" id="matchTable"></div>
+        </section>
+
+        <section id="alerts" class="page">
+          <div class="page-heading compact"><div><p class="eyebrow">NOTIFICATIONS</p><h1>Alerts</h1><p class="intro">Stay informed when LockX finds something worth reviewing.</p></div><button class="text-button" id="readAll">Mark all as read</button></div><div class="alert-list" id="alertList"></div>
+        </section>
+
+        <section id="monitoring" class="page">
+          <div class="page-heading compact"><div><p class="eyebrow">SEARCH OPERATIONS</p><h1>Monitoring</h1><p class="intro">Your search network runs on a scheduled, compliant cadence.</p></div><button class="primary-button" id="runScan"><span>↻</span> Run a fresh scan</button></div>
+          <div class="monitor-hero"><div class="scanner"><span></span><span></span><span></span><b>LIVE</b></div><div><p class="eyebrow">NETWORK STATUS</p><h2>All systems are monitoring</h2><p>14 approved sources are checking for signals linked to your active cases.</p></div><div class="next-scan"><span>Next scheduled scan</span><strong>00:52:17</strong><small>Continuous monitoring runs hourly</small></div></div>
+          <div class="monitor-grid"><section class="panel"><div class="panel-head"><div><h2>Scan timeline</h2><p>Today’s agent activity</p></div></div><div class="timeline" id="timeline"></div></section><section class="panel rules-panel"><div class="panel-head"><div><h2>Source protections</h2><p>How LockX searches responsibly</p></div></div><div class="rule"><span>✓</span><p><strong>Official access only</strong><br />API connections and permitted public sources</p></div><div class="rule"><span>✓</span><p><strong>Rate-limit aware</strong><br />Each source’s rules and cadence are respected</p></div><div class="rule"><span>✓</span><p><strong>Preserved evidence</strong><br />Findings are captured before they can change</p></div></section></div>
+        </section>
+
+        <section id="sources" class="page">
+          <div class="page-heading compact"><div><p class="eyebrow">CONNECTOR DIRECTORY</p><h1>Search sources</h1><p class="intro">Each source is independently authenticated and monitored within its terms.</p></div><button class="primary-button ghost">Request a source <span>→</span></button></div>
+          <div class="source-grid" id="sourceGrid"></div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="caseModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <form class="modal" id="caseForm"><button type="button" class="close" data-close="caseModal">×</button><p class="eyebrow">NEW RECOVERY CASE</p><h2 id="modalTitle">Tell us about the watch.</h2><p>We’ll use these details to create its unique search profile.</p><div class="form-grid"><label>Brand<input required name="brand" placeholder="e.g. Rolex" /></label><label>Model<input required name="model" placeholder="e.g. Submariner" /></label><label>Reference<input name="reference" placeholder="e.g. 124060" /></label><label>Serial number<input name="serial" placeholder="Optional but recommended" /></label></div><label>Distinctive details<textarea name="details" placeholder="Scratches, bracelet markings, custom features…"></textarea></label><div class="upload-zone"><span>↑</span><div><strong>Add reference photos</strong><small>JPG, PNG or HEIC · Up to 10 photos</small></div><button type="button">Choose files</button></div><div class="modal-footer"><span>🔒 Your case data is private and encrypted.</span><button class="primary-button" type="submit">Create case <span>→</span></button></div></form>
+    </div>
+    <div class="toast" id="toast"><span>✓</span><p><strong id="toastTitle">Case created</strong><br /><small id="toastText">Monitoring will begin shortly.</small></p></div>
+    <script src="app.js"></script>
+  </body>
+</html>
