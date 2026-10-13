@@ -1,20 +1,25 @@
-"""LockX Stolen Watch Recovery REST API starter.
 
-Run locally after installing requirements:
-  uvicorn main:app --reload
-"""
+"""LockX Stolen Watch Recovery REST API starter."""
+import os
 from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
+import httpx
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, HttpUrl
 
-app = FastAPI(title="LockX Recovery API", version="0.1.0")
+app = FastAPI(title="LockX Recovery API", version="0.2.0")
 
+class CaseStatus(str, Enum):
+    monitoring = "monitoring"
+    paused = "paused"
+    closed = "closed"
 
-class CaseStatus(str, Enum): monitoring = "monitoring"; paused = "paused"; closed = "closed"
-class MatchDecision(str, Enum): reviewing = "reviewing"; dismissed = "dismissed"; escalated = "escalated"
+class MatchDecision(str, Enum):
+    reviewing = "reviewing"
+    dismissed = "dismissed"
+    escalated = "escalated"
 
 class CaseCreate(BaseModel):
     brand: str = Field(min_length=1, max_length=120)
@@ -43,14 +48,27 @@ class EvidenceOut(BaseModel):
 _cases: dict[str, CaseOut] = {}
 _matches: dict[str, dict] = {}
 
-def current_owner_id() -> str:
-    # Replace with the existing LockX auth dependency (JWT/session), never a
-    # client-provided account id.
-    return "development-owner"
+def supabase_status() -> str:
+    """Verify Railway can reach Supabase without exposing server credentials."""
+    project_url = os.getenv("SUPABASE_URL")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not project_url or not service_key:
+        return "not_configured"
+    try:
+        response = httpx.get(
+            f"{project_url.rstrip('/')}/rest/v1/watch_cases?select=id&limit=1",
+            headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return "unavailable"
+    return "connected"
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "lockx-recovery", "time": datetime.now(timezone.utc)}
+    database = supabase_status()
+    return {"status": "ok" if database != "unavailable" else "degraded", "service": "lockx-recovery", "database": database, "time": datetime.now(timezone.utc)}
 
 @app.post("/api/v1/cases", response_model=CaseOut, status_code=status.HTTP_201_CREATED)
 def create_case(payload: CaseCreate) -> CaseOut:
@@ -60,23 +78,24 @@ def create_case(payload: CaseCreate) -> CaseOut:
 
 @app.get("/api/v1/cases", response_model=list[CaseOut])
 def list_cases() -> list[CaseOut]:
-    current_owner_id()
     return list(_cases.values())
 
 @app.post("/api/v1/cases/{case_id}/scan", status_code=status.HTTP_202_ACCEPTED)
 def request_scan(case_id: str) -> dict:
-    if case_id not in _cases: raise HTTPException(404, "Recovery case not found")
-    # Enqueue scan_case() with idempotency key and each connector's policy.
+    if case_id not in _cases:
+        raise HTTPException(404, "Recovery case not found")
     return {"job_id": str(uuid4()), "case_id": case_id, "status": "queued", "access_policy": "approved_sources_only"}
 
 @app.get("/api/v1/cases/{case_id}/matches")
 def list_matches(case_id: str) -> list[dict]:
-    if case_id not in _cases: raise HTTPException(404, "Recovery case not found")
+    if case_id not in _cases:
+        raise HTTPException(404, "Recovery case not found")
     return [match for match in _matches.values() if match["case_id"] == case_id]
 
 @app.post("/api/v1/matches/{match_id}/decision")
 def decide_match(match_id: str, payload: MatchDecisionIn) -> dict:
-    if match_id not in _matches: raise HTTPException(404, "Candidate match not found")
+    if match_id not in _matches:
+        raise HTTPException(404, "Candidate match not found")
     _matches[match_id]["status"] = payload.decision
     _matches[match_id]["decision_note"] = payload.note
     return _matches[match_id]
