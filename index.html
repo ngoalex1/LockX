@@ -9,6 +9,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="landing.css" />
+    <link rel="stylesheet" href="landing-asset.css" />
     <style>
       .case-row--button{width:100%;border:0;background:#fff;text-align:left;cursor:pointer}.case-row--button:hover{background:#fafcf9}.watch-thumb__image,.case-image{width:100%;height:100%;display:block;object-fit:cover}.case-image--empty{display:grid;place-items:center;background:linear-gradient(135deg,#dce2dd,#87908a 48%,#e8e8df 49%);color:#26483e;font-size:28px}.case-photo-count{font:10px "DM Mono";color:#7b837f}.listing-image img{width:100%;height:100%;object-fit:cover;display:block}.detail-nav{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px;color:#858b87;font:10px "DM Mono";letter-spacing:.6px}.case-detail-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:28px}.detail-actions{display:flex;gap:9px}.case-detail-grid{display:grid;grid-template-columns:1.4fr .8fr;gap:22px;margin-bottom:22px}.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px}.detail-photo{position:relative;margin:0;aspect-ratio:1;border-radius:6px;overflow:hidden;background:#edf0ed}.detail-photo img{width:100%;height:100%;display:block;object-fit:cover}.detail-photo button,.saved-photos button{position:absolute;right:6px;top:6px;width:25px;height:25px;border:0;border-radius:50%;background:#261b19dc;color:#fff;font-size:18px;cursor:pointer}.photo-empty{grid-column:1/-1;min-height:210px;display:grid;place-items:center;align-content:center;text-align:center;color:#818885;padding:20px}.photo-empty span{font-size:32px;color:#4f866f}.photo-empty strong{margin-top:7px;color:#3b4641}.photo-empty p{max-width:310px;font-size:11px;line-height:17px;margin:5px 0 11px}.detail-summary dl{margin:0;padding:13px 21px}.detail-summary dl>div{display:flex;justify-content:space-between;gap:20px;padding:10px 0;border-bottom:1px solid #eef0ed}.detail-summary dl>div:last-child{border:0}.detail-summary dt{color:#858c88;font-size:11px}.detail-summary dd{margin:0;text-align:right;font:11px "DM Mono";color:#35423d}.detail-notes{border-top:1px solid #eef0ed;padding:17px 21px 21px}.detail-notes strong{font-size:11px}.detail-notes p,.quiet-copy{font-size:11px;line-height:17px;color:#7e8581;margin:7px 0 0}.detail-lower-grid{display:grid;grid-template-columns:1.3fr .9fr;gap:22px;margin-bottom:20px}.detail-activity{padding:20px 22px 0}.detail-leads{padding:4px 21px 18px}.lead-row{padding:13px 0;border-bottom:1px solid #eff0ed}.lead-row:last-child{border:0}.lead-row strong,.lead-row small{display:block;font-size:11px}.lead-row small{color:#858c88;font:10px "DM Mono";margin-top:4px}.danger-button{border:0;background:transparent;color:#aa523e;font:600 12px "DM Sans";padding:10px 0;cursor:pointer}.saved-photos{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.saved-photos figure{position:relative;width:78px;height:62px;margin:0;border-radius:5px;overflow:hidden;background:#edf0ed}.saved-photos img{width:100%;height:100%;object-fit:cover}.saved-photos button{transform:scale(.76);transform-origin:top right}.pulse--waiting{background:#f5ebdd}.pulse--waiting span{background:#b57b3b;box-shadow:0 0 0 4px #b57b3b22}@media(max-width:900px){.case-detail-grid,.detail-lower-grid{grid-template-columns:1fr}.case-detail-heading{align-items:flex-start;flex-direction:column}.photo-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.detail-actions{width:100%}.detail-actions button{flex:1}.photo-grid{grid-template-columns:1fr 1fr}.case-detail-heading h1{font-size:28px}}
     </style>
@@ -17,7 +19,7 @@
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="#landing" data-page="landing" aria-label="LockX home">
-          <span class="brand-mark"><i></i><i></i><i></i></span><span>lock<span>x</span></span>
+          <span class="brand-mark"><i></i><i></i><i></i></span><span>Lock<span>X</span></span>
         </a>
         <nav class="main-nav" aria-label="Primary navigation">
           <button class="nav-item active" data-page="dashboard"><span class="nav-icon">⌂</span>Overview</button>
@@ -42,32 +44,25 @@
           <div class="top-actions"><button class="icon-button notification" data-page="alerts" aria-label="Alerts">♢<i></i></button><button class="help">?</button></div>
         </header>
 
-        <section id="landing" class="page landing-page">
-          <header class="landing-nav">
-            <a class="landing-brand" href="#landing" aria-label="LockX home"><span class="brand-mark"><i></i><i></i><i></i></span><span>lock<span>x</span></span></a>
-            <div class="landing-nav__links"><a href="#how-it-works">How it works</a><a href="#principles">Our principles</a></div>
-            <button class="landing-signin" data-action="signin">Sign in <span>→</span></button>
+        <section id="landing" class="page landing-page signal-page">
+          <header class="signal-nav">
+            <a class="signal-brand" href="#landing" aria-label="LockX home"><span class="brand-mark"><i></i><i></i><i></i></span><span>Lock<span>X</span></span></a>
+            <nav class="signal-nav__links" aria-label="Landing page navigation"><a href="#how-it-works">How it works</a><a href="#principles">Privacy</a></nav>
+            <button class="signal-signin" data-action="signin">Sign in <span>→</span></button>
           </header>
-          <div class="landing-hero">
-            <div class="landing-copy">
-              <p class="landing-kicker"><i></i> PRIVATE RECOVERY INFRASTRUCTURE</p>
+          <div class="signal-hero">
+            <div class="signal-copy">
+              <p class="signal-kicker">PRIVATE RECOVERY NETWORK</p>
               <h1>Every detail<br />can lead <em>home.</em></h1>
-              <p class="landing-lede">A protected workspace for documenting a missing watch, preserving its evidence, and reviewing potential leads from approved sources.</p>
-              <div class="landing-cta"><button class="landing-primary" data-action="start-recovery">Start a recovery case <span>→</span></button><a href="#how-it-works">Explore the process <span>↓</span></a></div>
-              <p class="landing-disclaimer">No public watch registry. Your recovery record stays private to your account.</p>
+              <p>Document a missing watch with the photographs, identifying details, and evidence that make it recognizable.</p>
+              <div class="signal-cta"><button data-action="start-recovery">Report a stolen watch <span>→</span></button><a href="#how-it-works">How it works <span>↓</span></a></div>
+              <small>PRIVATE BY DESIGN · NEVER A PUBLIC WATCH REGISTRY</small>
             </div>
-            <div class="landing-orbit" aria-hidden="true">
-              <div class="orbit-glow"></div><div class="orbit-line orbit-line--one"></div><div class="orbit-line orbit-line--two"></div>
-              <div class="watch-schematic"><span class="watch-crown"></span><span class="watch-hand watch-hand--hour"></span><span class="watch-hand watch-hand--minute"></span><span class="watch-center"></span><span class="watch-index watch-index--top"></span><span class="watch-index watch-index--right"></span><span class="watch-index watch-index--bottom"></span><span class="watch-index watch-index--left"></span></div>
-              <div class="signal-card signal-card--case"><span class="signal-dot"></span><small>CASE FILE</small><strong>PRIVATE</strong></div>
-              <div class="signal-card signal-card--evidence"><span class="signal-lock">✦</span><small>EVIDENCE</small><strong>HASHED</strong></div>
-              <div class="coordinate coordinate--one">34° 03' N / 118° 14' W</div><div class="coordinate coordinate--two">LOCKX // RECOVERY</div>
-            </div>
+            <div class="signal-art" role="img" aria-label="A watch dissolving into a city-at-night scene, with LockX evidence callouts"></div>
           </div>
-          <div class="landing-proof"><div><span>01</span><p><strong>Document the details</strong><br />Photos, serials, reference and distinctive marks, stored in a private case file.</p></div><div><span>02</span><p><strong>Monitor responsibly</strong><br />Only official APIs and authorized feeds can receive a search request.</p></div><div><span>03</span><p><strong>Review with evidence</strong><br />Potential leads retain their source context for your own assessment.</p></div></div>
-          <section id="how-it-works" class="landing-process"><div><p class="landing-kicker">THE LOCKX METHOD</p><h2>Designed for the moments after loss.</h2></div><p>Recovery is not a promise. It is a disciplined record: clear reference materials, careful monitoring, and a reliable history of what was found.</p></section>
-          <section id="principles" class="landing-principles"><article><span>◌</span><h3>Private by default</h3><p>Your cases and reference photos are accessible only through your signed-in workspace.</p></article><article><span>⌁</span><h3>Source-respectful</h3><p>LockX does not circumvent logins, CAPTCHAs, rate limits, robots restrictions, or marketplace rules.</p></article><article><span>✦</span><h3>Evidence-aware</h3><p>When an approved source returns a lead, its record is retained for thoughtful review.</p></article></section>
-          <footer class="landing-footer"><span>LOCKX / RECOVERY WORKSPACE</span><button data-action="start-recovery">Open your private workspace <span>→</span></button></footer>
+          <section id="how-it-works" class="signal-steps"><article><b>01</b><h2>Preserve the details</h2><p>Store reference photographs, serial information, and distinctive marks in a private case file.</p></article><article><b>02</b><h2>Monitor responsibly</h2><p>LockX only uses approved sources, official APIs, and authorized data feeds.</p></article><article><b>03</b><h2>Review the evidence</h2><p>Potential leads retain their source context so you can assess them carefully.</p></article></section>
+          <section id="principles" class="signal-principles"><div><p>THE LOCKX STANDARD</p><h2>A clear record when it matters most.</h2></div><p>Recovery is not a promise. It is a considered process built around the details that identify a watch and the evidence that gives each lead context.</p></section>
+          <footer class="signal-footer"><span>LOCKX / PRIVATE RECOVERY WORKSPACE</span><button data-action="start-recovery">Open your private workspace <span>→</span></button></footer>
         </section>
 
         <section id="dashboard" class="page active">
