@@ -1,22 +1,16 @@
-
-"""LockX Stolen Watch Recovery REST API starter."""
+"""LockX Recovery API — authenticated, owner-scoped case management."""
 import os
 from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
-app = FastAPI(title="LockX Recovery API", version="0.2.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://lockx.ai", "https://www.lockx.ai"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
+app = FastAPI(title="LockX Recovery API", version="0.3.0")
+app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
 
 class CaseStatus(str, Enum):
     monitoring = "monitoring"
@@ -37,6 +31,7 @@ class CaseCreate(BaseModel):
 
 class CaseOut(CaseCreate):
     id: str
+    case_number: str
     status: CaseStatus
     created_at: datetime
 
@@ -54,45 +49,49 @@ class EvidenceOut(BaseModel):
 
 _matches: dict[str, dict] = {}
 
-def supabase_request(method: str, path: str, *, payload: dict | None = None) -> httpx.Response:
-    project_url = os.getenv("SUPABASE_URL")
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not project_url or not service_key:
+def settings() -> tuple[str, str]:
+    url, key = os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
         raise HTTPException(503, "Case storage is not configured")
+    return url.rstrip("/"), key
+
+def supabase_request(method: str, path: str, payload: dict | None = None) -> httpx.Response:
+    url, key = settings()
     try:
-        response = httpx.request(
-            method,
-            f"{project_url.rstrip('/')}/rest/v1/{path.lstrip('/')}",
-            headers={
-                "apikey": service_key,
-                "Authorization": f"Bearer {service_key}",
-                "Content-Type": "application/json",
-                "Prefer": "return=representation",
-            },
-            json=payload,
-            timeout=10.0,
-        )
+        response = httpx.request(method, f"{url}/rest/v1/{path.lstrip('/')}", headers={"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Prefer": "return=representation"}, json=payload, timeout=10.0)
         response.raise_for_status()
         return response
     except httpx.HTTPError as exc:
         raise HTTPException(503, "Case storage is temporarily unavailable") from exc
 
-def supabase_status() -> str:
-    """Verify Railway can reach Supabase without exposing server credentials."""
-    project_url = os.getenv("SUPABASE_URL")
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not project_url or not service_key:
-        return "not_configured"
+def current_user_id(authorization: str | None = Header(default=None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in to access recovery cases")
+    url, key = settings()
     try:
-        response = httpx.get(
-            f"{project_url.rstrip('/')}/rest/v1/",
-            headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
-            timeout=5.0,
-        )
+        response = httpx.get(f"{url}/auth/v1/user", headers={"apikey": key, "Authorization": authorization}, timeout=10.0)
+        user = response.json() if response.status_code == 200 else {}
+        if not user.get("id"):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your session has expired; please sign in again")
+        return user["id"]
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(503, "Authentication is temporarily unavailable") from exc
+
+def serialize_case(row: dict) -> CaseOut:
+    return CaseOut(id=row["id"], case_number=row["case_number"], brand=row["brand"], model=row.get("model") or "Unknown model", reference=row.get("reference_number"), serial_number=row.get("serial_number"), distinctive_details=row.get("distinctive_marks") or row.get("description"), status=CaseStatus.paused if row.get("status") == "paused" else CaseStatus.monitoring, created_at=row["created_at"])
+
+def supabase_status() -> str:
+    try:
+        url, key = settings()
+        response = httpx.get(f"{url}/rest/v1/", headers={"apikey": key, "Authorization": f"Bearer {key}"}, timeout=5.0)
         response.raise_for_status()
+        return "connected"
+    except HTTPException:
+        return "not_configured"
     except httpx.HTTPError:
         return "unavailable"
-    return "connected"
 
 @app.get("/health")
 def health() -> dict:
@@ -100,42 +99,29 @@ def health() -> dict:
     return {"status": "ok" if database != "unavailable" else "degraded", "service": "lockx-recovery", "database": database, "time": datetime.now(timezone.utc)}
 
 @app.post("/api/v1/cases", response_model=CaseOut, status_code=status.HTTP_201_CREATED)
-def create_case(payload: CaseCreate) -> CaseOut:
-    case = {
-        "id": str(uuid4()),
-        "brand": payload.brand,
-        "model": payload.model,
-        "reference": payload.reference,
-        "serial_number": payload.serial_number,
-        "distinctive_details": payload.distinctive_details,
-        "status": CaseStatus.monitoring.value,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    response = supabase_request("POST", "watch_cases", payload=case)
-    return CaseOut(**response.json()[0])
+def create_case(payload: CaseCreate, owner_id: str = Depends(current_user_id)) -> CaseOut:
+    case_id = str(uuid4())
+    response = supabase_request("POST", "watch_cases", {"id": case_id, "owner_id": owner_id, "case_number": f"LX-{case_id.replace('-', '')[-8:].upper()}", "brand": payload.brand, "model": payload.model, "reference_number": payload.reference, "serial_number": payload.serial_number, "distinctive_marks": payload.distinctive_details, "status": "open"})
+    return serialize_case(response.json()[0])
 
 @app.get("/api/v1/cases", response_model=list[CaseOut])
-def list_cases() -> list[CaseOut]:
-    response = supabase_request(
-        "GET",
-        "watch_cases?select=id,brand,model,reference,serial_number,distinctive_details,status,created_at&order=created_at.desc",
-    )
-    return [CaseOut(**row) for row in response.json()]
+def list_cases(owner_id: str = Depends(current_user_id)) -> list[CaseOut]:
+    response = supabase_request("GET", "watch_cases?owner_id=eq." + owner_id + "&select=id,case_number,brand,model,reference_number,serial_number,distinctive_marks,status,created_at&order=created_at.desc")
+    return [serialize_case(row) for row in response.json()]
 
 @app.post("/api/v1/cases/{case_id}/scan", status_code=status.HTTP_202_ACCEPTED)
-def request_scan(case_id: str) -> dict:
+def request_scan(case_id: str, owner_id: str = Depends(current_user_id)) -> dict:
     return {"job_id": str(uuid4()), "case_id": case_id, "status": "queued", "access_policy": "approved_sources_only"}
 
 @app.get("/api/v1/cases/{case_id}/matches")
-def list_matches(case_id: str) -> list[dict]:
-    return [match for match in _matches.values() if match["case_id"] == case_id]
+def list_matches(case_id: str, owner_id: str = Depends(current_user_id)) -> list[dict]:
+    return [match for match in _matches.values() if match["case_id"] == case_id and match.get("owner_id") == owner_id]
 
 @app.post("/api/v1/matches/{match_id}/decision")
-def decide_match(match_id: str, payload: MatchDecisionIn) -> dict:
-    if match_id not in _matches:
+def decide_match(match_id: str, payload: MatchDecisionIn, owner_id: str = Depends(current_user_id)) -> dict:
+    if match_id not in _matches or _matches[match_id].get("owner_id") != owner_id:
         raise HTTPException(404, "Candidate match not found")
-    _matches[match_id]["status"] = payload.decision
-    _matches[match_id]["decision_note"] = payload.note
+    _matches[match_id].update(status=payload.decision, decision_note=payload.note)
     return _matches[match_id]
 
 @app.get("/api/v1/sources")
