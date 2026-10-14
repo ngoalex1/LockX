@@ -133,3 +133,21 @@ def delete_case(case_id: str, owner_id=Depends(current_user)):
             raise HTTPException(503, "Photo storage is temporarily unavailable") from exc
     supabase_request("DELETE", f"case_photos?case_id=eq.{case_id}")
     supabase_request("DELETE", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}")
+
+
+@app.get("/api/v1/cases/{case_id}/photos")
+def list_case_photos(case_id: str, owner_id=Depends(current_user)):
+    assert_case_owner(case_id, owner_id)
+    photos = supabase_request("GET", f"case_photos?case_id=eq.{case_id}&select=id,storage_path,created_at&order=created_at.asc").json()
+    url, key = settings()
+    results = []
+    for photo in photos:
+        try:
+            response = httpx.post(f"{url}/storage/v1/object/sign/case-photos/{photo['storage_path']}", headers=service_headers(key), json={"expiresIn": 3600}, timeout=30)
+            response.raise_for_status()
+            signed_url = response.json().get("signedURL")
+            if signed_url:
+                results.append({"id": photo["id"], "url": signed_url if signed_url.startswith("http") else f"{url}/storage/v1{signed_url}", "created_at": photo.get("created_at")})
+        except httpx.HTTPError as exc:
+            log.warning("Supabase Storage sign request failed: %s", exc)
+    return results
