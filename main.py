@@ -94,7 +94,7 @@ async def upload_photo(case_id: str, photo: UploadFile = File(...), owner_id=Dep
         raise HTTPException(503, "Photo storage is temporarily unavailable") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(503, "Photo storage is temporarily unavailable") from exc
-    supabase_request("POST", "case_photos", {"id": photo_id, "case_id": case_id, "owner_id": owner_id, "object_path": object_path, "original_name": (photo.filename or f"reference.{extension}")[:255], "content_type": content_type, "byte_size": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+    supabase_request("POST", "case_photos", {"id": photo_id, "case_id": case_id, "storage_path": object_path, "sha256": hashlib.sha256(content).hexdigest(), "image_role": "reference"})
     return {"id": photo_id, "retention": "private_evidence"}
 
 @app.post("/api/v1/cases/{case_id}/scan", status_code=202)
