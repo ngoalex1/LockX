@@ -117,3 +117,19 @@ def scan(case_id: str, owner_id=Depends(current_user)):
 
 @app.get("/api/v1/sources")
 def sources(): return [{"key": "official-api-example", "status": "not_configured", "access": "official_api_only"}]
+
+
+@app.post("/api/v1/cases/{case_id}/delete", status_code=204)
+def delete_case(case_id: str, owner_id=Depends(current_user)):
+    assert_case_owner(case_id, owner_id)
+    photos = supabase_request("GET", f"case_photos?case_id=eq.{case_id}&select=storage_path").json()
+    paths = [photo["storage_path"] for photo in photos if photo.get("storage_path")]
+    if paths:
+        url, key = settings()
+        try:
+            response = httpx.request("DELETE", f"{url}/storage/v1/object/case-photos", headers=service_headers(key), json={"prefixes": paths}, timeout=30)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(503, "Photo storage is temporarily unavailable") from exc
+    supabase_request("DELETE", f"case_photos?case_id=eq.{case_id}")
+    supabase_request("DELETE", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}")
