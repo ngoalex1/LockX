@@ -1,11 +1,13 @@
 
 import os, hashlib, logging
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Depends, UploadFile, File
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from connectors import SearchProfile, configured_connectors, source_catalog
+from worker import scan_case
 
 app = FastAPI()
 log = logging.getLogger("lockx.supabase")
@@ -35,10 +37,10 @@ def service_headers(key, content_type="application/json"):
     if key.count(".") == 2: headers["Authorization"] = f"Bearer {key}"
     return headers
 
-def supabase_request(method, path, payload=None):
+def supabase_request(method, path, payload=None, prefer="return=representation"):
     url, key = settings()
     try:
-        headers = service_headers(key); headers["Prefer"] = "return=representation"
+        headers = service_headers(key); headers["Prefer"] = prefer
         response = httpx.request(method, f"{url}/rest/v1/{path}", headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         return response
@@ -65,6 +67,40 @@ def serialize_case(row):
 
 def assert_case_owner(case_id, owner_id):
     if not supabase_request("GET", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}&select=id").json(): raise HTTPException(404, "Recovery case not found")
+
+def owned_case_row(case_id, owner_id):
+    rows = supabase_request("GET", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}&select=id,brand,model,reference_number,serial_number,distinctive_marks").json()
+    if not rows: raise HTTPException(404, "Recovery case not found")
+    return rows[0]
+
+def scan_profile(case_row):
+    return SearchProfile(case_id=case_row["id"], brand=case_row["brand"], model=case_row.get("model") or "", reference=case_row.get("reference_number"), serial_number=case_row.get("serial_number"), distinctive_details=case_row.get("distinctive_marks"))
+
+def serialize_scan(row):
+    return {"id": row["id"], "case_id": row["case_id"], "status": row["status"], "configured_sources": row.get("configured_sources") or [], "summary": row.get("summary") or {}, "requested_at": row.get("requested_at"), "started_at": row.get("started_at"), "completed_at": row.get("completed_at")}
+
+async def process_scan_job(job_id, owner_id, profile):
+    """Run only configured official connectors and preserve normalized evidence."""
+    try:
+        supabase_request("PATCH", f"marketplace_scan_jobs?id=eq.{job_id}", {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()})
+        findings = await scan_case(profile, configured_connectors())
+        for finding in findings:
+            listing = finding["listing"]
+            payload = {
+                "id": str(uuid5(NAMESPACE_URL, f"lockx:{profile.case_id}:{finding['connector_key']}:{listing.external_id}")), "owner_id": owner_id, "case_id": profile.case_id, "scan_job_id": job_id,
+                "connector_key": finding["connector_key"], "external_id": listing.external_id, "listing_url": listing.url,
+                "title": listing.title, "description": listing.description, "price": listing.price, "currency": listing.currency,
+                "location": listing.location, "listing_image_urls": listing.image_urls, "raw_listing": listing.raw,
+                "text_score": finding["confidence"], "image_score": finding["image_score"], "confidence": finding["confidence"],
+                "visual_status": finding["visual_status"], "match_reasons": finding["text_reasons"],
+                "evidence_sha256": finding["evidence_sha256"], "evidence_captured_at": finding["found_at"],
+            }
+            supabase_request("POST", "marketplace_candidates?on_conflict=case_id,connector_key,external_id", payload, "resolution=merge-duplicates,return=representation")
+        supabase_request("PATCH", f"marketplace_scan_jobs?id=eq.{job_id}", {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat(), "summary": {"findings": len(findings), "visual_matching": "not_run_without_explicit_owner_consent"}})
+    except Exception as exc:
+        log.exception("Marketplace scan %s failed", job_id)
+        try: supabase_request("PATCH", f"marketplace_scan_jobs?id=eq.{job_id}", {"status": "failed", "completed_at": datetime.now(timezone.utc).isoformat(), "summary": {"error": "connector_request_failed"}})
+        except Exception: log.exception("Could not update failed scan %s", job_id)
 
 @app.get("/health")
 def health():
@@ -111,12 +147,29 @@ async def upload_photo(case_id: str, photo: UploadFile = File(...), owner_id=Dep
     return {"id": photo_id, "retention": "private_evidence"}
 
 @app.post("/api/v1/cases/{case_id}/scan", status_code=202)
-def scan(case_id: str, owner_id=Depends(current_user)):
-    assert_case_owner(case_id, owner_id)
-    return {"job_id": str(uuid4()), "case_id": case_id, "status": "queued", "access_policy": "approved_sources_only"}
+def scan(case_id: str, background_tasks: BackgroundTasks, owner_id=Depends(current_user)):
+    case_row = owned_case_row(case_id, owner_id)
+    connectors = configured_connectors()
+    job_id = str(uuid4())
+    source_keys = [connector.key for connector in connectors]
+    status = "queued" if source_keys else "waiting_for_source_access"
+    row = supabase_request("POST", "marketplace_scan_jobs", {"id": job_id, "owner_id": owner_id, "case_id": case_id, "status": status, "configured_sources": source_keys, "summary": {"policy": "official_api_or_authorized_feed_only", "owner_photo_sharing": "not_started_without_explicit_consent"}}).json()[0]
+    if connectors: background_tasks.add_task(process_scan_job, job_id, owner_id, scan_profile(case_row))
+    return serialize_scan(row)
 
 @app.get("/api/v1/sources")
-def sources(): return [{"key": "official-api-example", "status": "not_configured", "access": "official_api_only"}]
+def sources(): return source_catalog()
+
+@app.get("/api/v1/cases/{case_id}/scans")
+def case_scans(case_id: str, owner_id=Depends(current_user)):
+    assert_case_owner(case_id, owner_id)
+    rows = supabase_request("GET", f"marketplace_scan_jobs?case_id=eq.{case_id}&owner_id=eq.{owner_id}&select=*&order=requested_at.desc").json()
+    return [serialize_scan(row) for row in rows]
+
+@app.get("/api/v1/matches")
+def matches(owner_id=Depends(current_user)):
+    rows = supabase_request("GET", f"marketplace_candidates?owner_id=eq.{owner_id}&select=id,case_id,connector_key,listing_url,title,price,currency,location,listing_image_urls,confidence,visual_status,match_reasons,status,evidence_sha256,evidence_captured_at,created_at&order=created_at.desc").json()
+    return rows
 
 
 @app.post("/api/v1/cases/{case_id}/delete", status_code=204)
