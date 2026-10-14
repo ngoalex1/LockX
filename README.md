@@ -29,6 +29,16 @@ Recommended domain model: `RecoveryCase`, `CasePhoto`, `SearchProfile`, `Connect
 
 Each marketplace connector should implement: `authorize()`, `health()`, `search(searchProfile)`, `normalize(result)`, and `rateLimitPolicy()`. Connectors must use official APIs or documented/allowed access only—never CAPTCHA bypasses, login automation, robots-rule evasion, or limit circumvention.
 
+## Marketplace network setup
+
+The marketplace layer is deliberately compliance-first. It never uses browser automation, CAPTCHA bypassing, login automation, or rate-limit/robots evasion. A source is only queried after its official API credentials or expressly authorized partner feed has been configured.
+
+1. In Supabase SQL Editor, run [`marketplace_schema.sql`](marketplace_schema.sql) once to create scan-job and candidate-evidence tables.
+2. In Railway, set `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` from an approved eBay Developer application. Optionally set `EBAY_MARKETPLACE_ID` (defaults to `EBAY_US`).
+3. Redeploy the API. eBay will then be marked configured and can run Browse API searches in the background.
+
+Chrono24, Facebook Marketplace, Craigslist, auctions, and dealer sources intentionally remain inactive until LockX has the source's approved API, licensed feed, or written partner authorization. Reference photos remain inside LockX; a separate, explicit owner-consent flow and an approved image-analysis provider are required before any external visual comparison.
+
 ## Start the backend
 
 With Python 3.11+ available on your deployment machine:
