@@ -1,129 +1,53 @@
-"""LockX Recovery API — authenticated, owner-scoped case management."""
-import os
-from datetime import datetime, timezone
-from enum import Enum
+
+import os,hashlib
+from datetime import datetime,timezone
 from uuid import uuid4
-
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import FastAPI,Header,HTTPException,Depends,UploadFile,File
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, HttpUrl
-
-app = FastAPI(title="LockX Recovery API", version="0.3.0")
-app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
-
-class CaseStatus(str, Enum):
-    monitoring = "monitoring"
-    paused = "paused"
-    closed = "closed"
-
-class MatchDecision(str, Enum):
-    reviewing = "reviewing"
-    dismissed = "dismissed"
-    escalated = "escalated"
-
-class CaseCreate(BaseModel):
-    brand: str = Field(min_length=1, max_length=120)
-    model: str = Field(min_length=1, max_length=160)
-    reference: str | None = Field(default=None, max_length=120)
-    serial_number: str | None = Field(default=None, max_length=120)
-    distinctive_details: str | None = Field(default=None, max_length=5000)
-
-class CaseOut(CaseCreate):
-    id: str
-    case_number: str
-    status: CaseStatus
-    created_at: datetime
-
-class MatchDecisionIn(BaseModel):
-    decision: MatchDecision
-    note: str | None = Field(default=None, max_length=2000)
-
-class EvidenceOut(BaseModel):
-    id: str
-    candidate_id: str
-    source_url: HttpUrl
-    sha256: str
-    captured_at: datetime
-    retention: str = "immutable"
-
-_matches: dict[str, dict] = {}
-
-def settings() -> tuple[str, str]:
-    url, key = os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key:
-        raise HTTPException(503, "Case storage is not configured")
-    return url.rstrip("/"), key
-
-def supabase_request(method: str, path: str, payload: dict | None = None) -> httpx.Response:
-    url, key = settings()
-    try:
-        response = httpx.request(method, f"{url}/rest/v1/{path.lstrip('/')}", headers={"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Prefer": "return=representation"}, json=payload, timeout=10.0)
-        response.raise_for_status()
-        return response
-    except httpx.HTTPError as exc:
-        raise HTTPException(503, "Case storage is temporarily unavailable") from exc
-
-def current_user_id(authorization: str | None = Header(default=None)) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in to access recovery cases")
-    url, key = settings()
-    try:
-        response = httpx.get(f"{url}/auth/v1/user", headers={"apikey": key, "Authorization": authorization}, timeout=10.0)
-        user = response.json() if response.status_code == 200 else {}
-        if not user.get("id"):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your session has expired; please sign in again")
-        return user["id"]
-    except HTTPException:
-        raise
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(503, "Authentication is temporarily unavailable") from exc
-
-def serialize_case(row: dict) -> CaseOut:
-    return CaseOut(id=row["id"], case_number=row["case_number"], brand=row["brand"], model=row.get("model") or "Unknown model", reference=row.get("reference_number"), serial_number=row.get("serial_number"), distinctive_details=row.get("distinctive_marks") or row.get("description"), status=CaseStatus.paused if row.get("status") == "paused" else CaseStatus.monitoring, created_at=row["created_at"])
-
-def supabase_status() -> str:
-    try:
-        url, key = settings()
-        response = httpx.get(f"{url}/rest/v1/", headers={"apikey": key, "Authorization": f"Bearer {key}"}, timeout=5.0)
-        response.raise_for_status()
-        return "connected"
-    except HTTPException:
-        return "not_configured"
-    except httpx.HTTPError:
-        return "unavailable"
-
+from pydantic import BaseModel
+app=FastAPI()
+app.add_middleware(CORSMiddleware,allow_origins=["https://lockx.ai","https://www.lockx.ai"],allow_methods=["GET","POST"],allow_headers=["*"])
+class C(BaseModel):
+ brand:str;model:str;reference:str|None=None;serial_number:str|None=None;distinctive_details:str|None=None
+def cfg():
+ u,k=os.getenv("SUPABASE_URL"),os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+ if not u or not k:raise HTTPException(503,"Case storage is not configured")
+ return u.rstrip("/"),k
+def req(method,path,data=None):
+ u,k=cfg()
+ try:
+  r=httpx.request(method,f"{u}/rest/v1/{path}",headers={"apikey":k,"Authorization":f"Bearer {k}","Content-Type":"application/json","Prefer":"return=representation"},json=data,timeout=30);r.raise_for_status();return r
+ except httpx.HTTPError as e:raise HTTPException(503,"Case storage is temporarily unavailable") from e
+def who(a:str|None=Header(default=None)):
+ if not a or not a.startswith("Bearer "):raise HTTPException(401,"Sign in to access recovery cases")
+ u,k=cfg();r=httpx.get(f"{u}/auth/v1/user",headers={"apikey":k,"Authorization":a},timeout=10)
+ if r.status_code!=200 or not r.json().get("id"):raise HTTPException(401,"Your session has expired; please sign in again")
+ return r.json()["id"]
+def out(x):return {"id":x["id"],"case_number":x["case_number"],"brand":x["brand"],"model":x.get("model") or "Unknown model","reference":x.get("reference_number"),"serial_number":x.get("serial_number"),"distinctive_details":x.get("distinctive_marks"),"status":"paused" if x.get("status")=="paused" else "monitoring","created_at":x["created_at"]}
+def owned(i,o):
+ if not req("GET",f"watch_cases?id=eq.{i}&owner_id=eq.{o}&select=id").json():raise HTTPException(404,"Recovery case not found")
 @app.get("/health")
-def health() -> dict:
-    database = supabase_status()
-    return {"status": "ok" if database != "unavailable" else "degraded", "service": "lockx-recovery", "database": database, "time": datetime.now(timezone.utc)}
-
-@app.post("/api/v1/cases", response_model=CaseOut, status_code=status.HTTP_201_CREATED)
-def create_case(payload: CaseCreate, owner_id: str = Depends(current_user_id)) -> CaseOut:
-    case_id = str(uuid4())
-    response = supabase_request("POST", "watch_cases", {"id": case_id, "owner_id": owner_id, "case_number": f"LX-{case_id.replace('-', '')[-8:].upper()}", "brand": payload.brand, "model": payload.model, "reference_number": payload.reference, "serial_number": payload.serial_number, "distinctive_marks": payload.distinctive_details, "status": "open"})
-    return serialize_case(response.json()[0])
-
-@app.get("/api/v1/cases", response_model=list[CaseOut])
-def list_cases(owner_id: str = Depends(current_user_id)) -> list[CaseOut]:
-    response = supabase_request("GET", "watch_cases?owner_id=eq." + owner_id + "&select=id,case_number,brand,model,reference_number,serial_number,distinctive_marks,status,created_at&order=created_at.desc")
-    return [serialize_case(row) for row in response.json()]
-
-@app.post("/api/v1/cases/{case_id}/scan", status_code=status.HTTP_202_ACCEPTED)
-def request_scan(case_id: str, owner_id: str = Depends(current_user_id)) -> dict:
-    return {"job_id": str(uuid4()), "case_id": case_id, "status": "queued", "access_policy": "approved_sources_only"}
-
-@app.get("/api/v1/cases/{case_id}/matches")
-def list_matches(case_id: str, owner_id: str = Depends(current_user_id)) -> list[dict]:
-    return [match for match in _matches.values() if match["case_id"] == case_id and match.get("owner_id") == owner_id]
-
-@app.post("/api/v1/matches/{match_id}/decision")
-def decide_match(match_id: str, payload: MatchDecisionIn, owner_id: str = Depends(current_user_id)) -> dict:
-    if match_id not in _matches or _matches[match_id].get("owner_id") != owner_id:
-        raise HTTPException(404, "Candidate match not found")
-    _matches[match_id].update(status=payload.decision, decision_note=payload.note)
-    return _matches[match_id]
-
+def health():
+ try:u,k=cfg();httpx.get(f"{u}/rest/v1/",headers={"apikey":k,"Authorization":f"Bearer {k}"},timeout=5).raise_for_status();d="connected"
+ except Exception:d="unavailable"
+ return {"status":"ok" if d=="connected" else "degraded","database":d,"time":datetime.now(timezone.utc)}
+@app.post("/api/v1/cases",status_code=201)
+def create(c:C,o=Depends(who)):
+ i=str(uuid4());return out(req("POST","watch_cases",{"id":i,"owner_id":o,"case_number":f"LX-{i.replace('-','')[-8:].upper()}","brand":c.brand,"model":c.model,"reference_number":c.reference,"serial_number":c.serial_number,"distinctive_marks":c.distinctive_details,"status":"open"}).json()[0])
+@app.get("/api/v1/cases")
+def cases(o=Depends(who)):return [out(x) for x in req("GET",f"watch_cases?owner_id=eq.{o}&select=id,case_number,brand,model,reference_number,serial_number,distinctive_marks,status,created_at&order=created_at.desc").json()]
+@app.post("/api/v1/cases/{i}/photos",status_code=201)
+async def photo(i:str,photo:UploadFile=File(...),o=Depends(who)):
+ owned(i,o);t=(photo.content_type or "").lower()
+ if t not in {"image/jpeg","image/png","image/heic"}:raise HTTPException(415,"Use a JPG, PNG, or HEIC reference photo")
+ b=await photo.read(10485761)
+ if not b or len(b)>10485760:raise HTTPException(413,"Each reference photo must be 10 MB or smaller")
+ e={"image/jpeg":"jpg","image/png":"png","image/heic":"heic"}[t];p=str(uuid4());path=f"{o}/{i}/{p}.{e}";u,k=cfg()
+ try:r=httpx.put(f"{u}/storage/v1/object/case-photos/{path}",headers={"apikey":k,"Authorization":f"Bearer {k}","Content-Type":t},content=b,timeout=30);r.raise_for_status()
+ except httpx.HTTPError as x:raise HTTPException(503,"Photo storage is temporarily unavailable") from x
+ h=hashlib.sha256(b).hexdigest();req("POST","case_photos",{"id":p,"case_id":i,"owner_id":o,"object_path":path,"original_name":(photo.filename or f"reference.{e}")[:255],"content_type":t,"byte_size":len(b),"sha256":h});return {"id":p,"sha256":h,"retention":"private_evidence"}
+@app.post("/api/v1/cases/{i}/scan",status_code=202)
+def scan(i:str,o=Depends(who)):owned(i,o);return {"job_id":str(uuid4()),"case_id":i,"status":"queued","access_policy":"approved_sources_only"}
 @app.get("/api/v1/sources")
-def sources() -> list[dict]:
-    return [{"key": "official-api-example", "status": "not_configured", "access": "official_api_only"}]
+def sources():return [{"key":"official-api-example","status":"not_configured","access":"official_api_only"}]
