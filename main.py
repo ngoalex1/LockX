@@ -9,9 +9,16 @@ from pydantic import BaseModel
 
 app = FastAPI()
 log = logging.getLogger("lockx.supabase")
-app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST", "PATCH"], allow_headers=["*"])
 
 class CaseCreate(BaseModel):
+    brand: str
+    model: str
+    reference: str | None = None
+    serial_number: str | None = None
+    distinctive_details: str | None = None
+
+class CaseUpdate(BaseModel):
     brand: str
     model: str
     reference: str | None = None
@@ -75,6 +82,12 @@ def create_case(case: CaseCreate, owner_id=Depends(current_user)):
 @app.get("/api/v1/cases")
 def list_cases(owner_id=Depends(current_user)):
     return [serialize_case(row) for row in supabase_request("GET", f"watch_cases?owner_id=eq.{owner_id}&select=id,case_number,brand,model,reference_number,serial_number,distinctive_marks,status,created_at&order=created_at.desc").json()]
+
+@app.patch("/api/v1/cases/{case_id}")
+def update_case(case_id: str, case: CaseUpdate, owner_id=Depends(current_user)):
+    assert_case_owner(case_id, owner_id)
+    row = supabase_request("PATCH", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}", {"brand": case.brand, "model": case.model, "reference_number": case.reference, "serial_number": case.serial_number, "distinctive_marks": case.distinctive_details}).json()[0]
+    return serialize_case(row)
 
 @app.post("/api/v1/cases/{case_id}/photos", status_code=201)
 async def upload_photo(case_id: str, photo: UploadFile = File(...), owner_id=Depends(current_user)):
