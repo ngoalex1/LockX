@@ -51,3 +51,53 @@ const renderWithoutExternalCaseDelete=render;render=function(){renderWithoutExte
 function ensureCaseDeleteInEditor(){let button=document.querySelector('#deleteCaseInEditor');if(button)return button;button=document.createElement('button');button.id='deleteCaseInEditor';button.type='button';button.textContent='Delete this case';button.style.cssText='display:block;margin-top:14px;border:0;background:transparent;padding:4px 0;color:#a74e3b;font:600 12px DM Sans,sans-serif;cursor:pointer';button.onclick=async()=>{const currentCase=cases.find(item=>item.id===editingCaseId);if(!currentCase)return;if(!confirm('Delete '+currentCase.name+'? This permanently removes the case and its private reference photos.'))return;button.disabled=true;button.textContent='Deleting…';try{const response=await fetch(API_BASE+'/cases/'+currentCase.id+'/delete',{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});if(!response.ok)throw Error();cases=cases.filter(item=>item.id!==currentCase.id);render();document.querySelector('#caseModal').classList.remove('open');editingCaseId=null;openNewCase();go('cases');toast('Case deleted','The case and its private reference photos were removed.')}catch{button.disabled=false;button.textContent='Delete this case';toast('Unable to delete case','Please try again shortly.')}};document.querySelector('#caseForm .modal-footer').insertAdjacentElement('afterend',button);return button}
 const openCaseEditorWithDeleteInEditor=openCaseEditor;openCaseEditor=function(id){openCaseEditorWithDeleteInEditor(id);const button=ensureCaseDeleteInEditor();button.hidden=false;button.disabled=false;button.textContent='Delete this case'};
 const openNewCaseWithDeleteInEditor=openNewCase;openNewCase=function(){openNewCaseWithDeleteInEditor();const button=ensureCaseDeleteInEditor();button.hidden=true;button.disabled=false;button.textContent='Delete this case'};
+
+
+// OVERVIEW-CASE-PHOTOS: use signed, private reference-photo previews on the
+// dashboard and make each active-case row open its editable recovery record.
+const renderWithCaseEditorDelete=render;
+function wireOverviewCaseRows(){
+ const rows=[...document.querySelectorAll('#dashCases .case-row')];
+ rows.forEach((row,index)=>{
+  const recoveryCase=cases[index];
+  if(!recoveryCase)return;
+  row.dataset.editCase=recoveryCase.id;
+  row.setAttribute('role','button');
+  row.setAttribute('tabindex','0');
+  row.setAttribute('aria-label','Open '+recoveryCase.name);
+  row.style.cursor='pointer';
+  if(!row.querySelector('.case-arrow'))row.insertAdjacentHTML('beforeend','<span class="case-arrow" aria-hidden="true">→</span>');
+ });
+}
+async function refreshOverviewReferencePhotos(){
+ if(!session)return;
+ await Promise.all(cases.slice(0,3).map(async recoveryCase=>{
+  try{
+   let photos=referencePhotoCache.get(recoveryCase.id);
+   if(!photos){
+    const response=await fetch(API_BASE+'/cases/'+recoveryCase.id+'/photos',{headers:{Authorization:'Bearer '+session.access_token}});
+    if(!response.ok)return;
+    photos=await response.json();
+    referencePhotoCache.set(recoveryCase.id,photos);
+   }
+   const thumbnail=document.querySelector('#dashCases [data-edit-case="'+recoveryCase.id+'"] .watch-thumb');
+   if(!thumbnail||!photos[0]?.url)return;
+   let image=thumbnail.querySelector('img[data-overview-reference-preview]');
+   if(!image){
+    image=document.createElement('img');
+    image.dataset.overviewReferencePreview='true';
+    image.alt='Reference photo for '+recoveryCase.name;
+    image.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;display:block';
+    thumbnail.append(image);
+   }
+   image.src=photos[0].url;
+   thumbnail.classList.add('has-reference');
+  }catch{}
+ }));
+}
+render=function(){renderWithCaseEditorDelete();wireOverviewCaseRows();refreshOverviewReferencePhotos()};
+document.addEventListener('keydown',event=>{
+ const row=event.target.closest('#dashCases [data-edit-case]');
+ if(row&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openCaseEditor(row.dataset.editCase)}
+});
+wireOverviewCaseRows();refreshOverviewReferencePhotos();
