@@ -101,3 +101,42 @@ document.addEventListener('keydown',event=>{
  if(row&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openCaseEditor(row.dataset.editCase)}
 });
 wireOverviewCaseRows();refreshOverviewReferencePhotos();
+
+// MARKETPLACE-NETWORK: approved-source status, scan jobs, and reviewable
+// candidates. No marketplace is queried unless its official credentials exist.
+const marketplaceEscape=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const marketplaceHeaders=()=>({Authorization:'Bearer '+session.access_token});
+let marketplaceSources=[];
+function sourceState(source){return source.configured?'Connected':source.status.replaceAll('_',' ')}
+function renderSources(sources){
+ const grid=document.querySelector('#sourceGrid');if(!grid)return;
+ grid.innerHTML=sources.map(source=>'<article class="source"><div class="source-top"><span class="source-logo">'+marketplaceEscape(source.name.slice(0,2).toUpperCase())+'</span><span class="state '+(source.configured?'':'paused')+'">'+marketplaceEscape(sourceState(source))+'</span></div><h2>'+marketplaceEscape(source.name)+'</h2><p>'+marketplaceEscape(source.description)+'</p><div class="source-footer"><small>'+marketplaceEscape(source.access.replaceAll('_',' '))+'</small><small class="'+(source.configured?'':'wait')+'">'+(source.configured?'Scanning':'Access required')+'</small></div></article>').join('');
+}
+function renderMarketplaceMatches(matches){
+ const table=document.querySelector('#matchTable'),preview=document.querySelector('#dashMatches');
+ const empty='<div class="empty-state"><strong>No approved-source candidates yet.</strong><p>New candidates will appear after a configured marketplace scan.</p></div>';
+ if(table)table.innerHTML=matches.length?'<div class="match-head"><span>Candidate</span><span>Source</span><span>Confidence</span><span>Evidence</span><span></span></div>'+matches.map(match=>'<article class="match-row"><div class="match-item"><div class="listing-image"></div><div class="match-title"><strong>'+marketplaceEscape(match.title)+'</strong><p>'+marketplaceEscape(match.location||'Location unavailable')+(match.price?' · '+marketplaceEscape(match.price)+' '+marketplaceEscape(match.currency||''):'')+'</p></div></div><div class="source-label">'+marketplaceEscape(match.connector_key.replaceAll('_',' '))+'<small>'+marketplaceEscape(match.visual_status.replaceAll('_',' '))+'</small></div><strong class="confidence '+(match.confidence>=.8?'high':'')+'">'+Math.round(Number(match.confidence)*100)+'%</strong><small title="SHA-256 evidence digest">SHA-256 ✓</small><a class="text-button" href="'+marketplaceEscape(match.listing_url)+'" target="_blank" rel="noreferrer">Review →</a></article>').join(''):empty;
+ if(preview)preview.innerHTML=matches.slice(0,2).map(match=>'<div class="mini-match"><div class="listing-image"></div><div><strong>'+marketplaceEscape(match.title)+'</strong><p>'+marketplaceEscape(match.connector_key.replaceAll('_',' '))+' · '+Math.round(Number(match.confidence)*100)+'% confidence</p></div><a class="confidence" href="'+marketplaceEscape(match.listing_url)+'" target="_blank" rel="noreferrer">Review →</a></div>').join('')||empty;
+}
+function renderScanTimeline(scans){const timeline=document.querySelector('#timeline');if(!timeline)return;timeline.innerHTML=scans.length?scans.slice(0,5).map(scan=>'<div class="timeline-event"><p><strong>'+marketplaceEscape(scan.status.replaceAll('_',' '))+'</strong><br />'+marketplaceEscape((scan.configured_sources||[]).join(', ')||'No approved connector configured')+'</p><small>'+marketplaceEscape(scan.requested_at||'just now')+'</small></div>').join(''):'<div class="timeline-event"><p><strong>Ready for approved sources</strong><br />Add marketplace credentials or an authorized feed to begin monitoring.</p></div>'}
+async function loadMarketplaceNetwork(){
+ try{const sourceResponse=await fetch(API_BASE+'/sources');if(sourceResponse.ok){marketplaceSources=await sourceResponse.json();renderSources(marketplaceSources)}
+  if(!session)return;
+  const matchResponse=await fetch(API_BASE+'/matches',{headers:marketplaceHeaders()});if(matchResponse.ok)renderMarketplaceMatches(await matchResponse.json());
+  const scanResponses=await Promise.all(cases.slice(0,3).map(recoveryCase=>fetch(API_BASE+'/cases/'+recoveryCase.id+'/scans',{headers:marketplaceHeaders()})));
+  const scans=(await Promise.all(scanResponses.filter(response=>response.ok).map(response=>response.json()))).flat().sort((a,b)=>String(b.requested_at).localeCompare(String(a.requested_at)));renderScanTimeline(scans);
+ }catch{}
+}
+const loadCasesWithMarketplaceNetwork=loadCases;loadCases=async function(){await loadCasesWithMarketplaceNetwork();loadMarketplaceNetwork()};
+const goWithMarketplaceNetwork=go;go=function(page){goWithMarketplaceNetwork(page);if(['sources','matches','monitoring'].includes(page))loadMarketplaceNetwork()};
+document.querySelector('#runScan')?.addEventListener('click',async()=>{
+ if(!session){authModal();toast('Sign in required','Sign in before starting a compliant marketplace scan.');return}
+ if(!cases.length){toast('No recovery cases','Create a recovery case before starting a scan.');return}
+ const button=document.querySelector('#runScan');button.disabled=true;
+ try{const responses=await Promise.all(cases.filter(recoveryCase=>recoveryCase.status!=='Paused').map(recoveryCase=>fetch(API_BASE+'/cases/'+recoveryCase.id+'/scan',{method:'POST',headers:marketplaceHeaders()})));
+ const jobs=await Promise.all(responses.map(response=>response.ok?response.json():Promise.reject()));
+ const queued=jobs.filter(job=>job.status==='queued').length;
+ toast(queued?'Approved scan queued':'Source access required',queued?'LockX is checking configured official connectors.':'No marketplace credentials are connected yet. Your case data was not sent to any marketplace.');loadMarketplaceNetwork();
+ }catch{toast('Unable to start scan','Please try again shortly.')}finally{button.disabled=false}
+});
+loadMarketplaceNetwork();
