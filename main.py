@@ -22,7 +22,7 @@ def req(method,path,data=None):
   # unprivileged user request, which causes the RLS failure seen in case intake.
   r=httpx.request(method,f"{u}/rest/v1/{path}",headers={"apikey":k,"Content-Type":"application/json","Prefer":"return=representation"},json=data,timeout=30);r.raise_for_status();return r
  except httpx.HTTPError as e:raise HTTPException(503,"Case storage is temporarily unavailable") from e
-def who(a:str|None=Header(default=None)):
+def who(a:str|None=Header(default=None,alias="Authorization")):
  if not a or not a.startswith("Bearer "):raise HTTPException(401,"Sign in to access recovery cases")
  u,_=cfg()
  public_key=os.getenv("SUPABASE_PUBLISHABLE_KEY","sb_publishable_7J4GYdd-XvtT0SJ-gOG0VQ_Py1qXP1o")
