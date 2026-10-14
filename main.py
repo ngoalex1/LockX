@@ -24,7 +24,9 @@ def req(method,path,data=None):
  except httpx.HTTPError as e:raise HTTPException(503,"Case storage is temporarily unavailable") from e
 def who(a:str|None=Header(default=None)):
  if not a or not a.startswith("Bearer "):raise HTTPException(401,"Sign in to access recovery cases")
- u,k=cfg();r=httpx.get(f"{u}/auth/v1/user",headers={"apikey":k,"Authorization":a},timeout=10)
+ u,_=cfg()
+ public_key=os.getenv("SUPABASE_PUBLISHABLE_KEY","sb_publishable_7J4GYdd-XvtT0SJ-gOG0VQ_Py1qXP1o")
+ r=httpx.get(f"{u}/auth/v1/user",headers={"apikey":public_key,"Authorization":a},timeout=10)
  if r.status_code!=200 or not r.json().get("id"):raise HTTPException(401,"Your session has expired; please sign in again")
  return r.json()["id"]
 def out(x):return {"id":x["id"],"case_number":x["case_number"],"brand":x["brand"],"model":x.get("model") or "Unknown model","reference":x.get("reference_number"),"serial_number":x.get("serial_number"),"distinctive_details":x.get("distinctive_marks"),"status":"paused" if x.get("status")=="paused" else "monitoring","created_at":x["created_at"]}
