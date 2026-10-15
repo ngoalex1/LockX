@@ -52,3 +52,7 @@ uvicorn main:app --reload
 The starter uses in-memory storage strictly for local API exploration. Replace it with Postgres, your LockX authentication dependency, object storage, and a real queue before launch.
 
 For a real deployment, host this frontend on Vercel or Cloudflare Pages; use an authenticated API service, managed Postgres/object storage, and a queue worker for scheduled scans and image analysis.
+
+## Lost & Found
+
+Missing-item reports, finder photo intake, reward pledges, match review and returns are documented in [LOST_FOUND.md](LOST_FOUND.md).

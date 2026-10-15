@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="lost-found.css" />
     <link rel="stylesheet" href="landing.css" />
     <link rel="stylesheet" href="landing-asset.css" />
     <style>
@@ -28,6 +29,7 @@
         <nav class="main-nav" aria-label="Primary navigation">
           <button class="nav-item active" data-page="dashboard"><span class="nav-icon">⌂</span>Overview</button>
           <button class="nav-item" data-page="vault"><span class="nav-icon">◇</span>Digital Vault <b id="vaultCount">00</b></button>
+          <button class="nav-item" data-page="lost-found"><span class="nav-icon">⌕</span>Lost &amp; Found <b class="lf-new">NEW</b></button>
           <button class="nav-item" data-page="cases"><span class="nav-icon">◫</span>My cases <b id="caseCount">03</b></button>
           <button class="nav-item" data-page="matches"><span class="nav-icon">◌</span>Potential matches <b class="alert-badge">07</b></button>
           <button class="nav-item" data-page="alerts"><span class="nav-icon">♢</span>Alerts</button>
@@ -52,7 +54,7 @@
         <section id="landing" class="page landing-page signal-page">
           <header class="signal-nav">
             <a class="signal-brand" href="#landing" aria-label="LockX home"><span class="brand-mark"><i></i><i></i><i></i></span><span>Lock<span>X</span></span></a>
-            <nav class="signal-nav__links" aria-label="Landing page navigation"><a href="#how-it-works">How it works</a><a href="#principles">Privacy</a></nav>
+            <nav class="signal-nav__links" aria-label="Landing page navigation"><a href="#how-it-works">How it works</a><a href="#principles">Privacy</a><button class="text-button" data-page="lost-found">Lost &amp; Found</button></nav>
             <button class="signal-signin" data-action="signin">Sign in <span>→</span></button>
           </header>
           <div class="signal-hero">
@@ -61,7 +63,7 @@
               <h1>Every detail<br />can lead <em>home.</em></h1>
               <p>Document a missing watch with the photographs, identifying details, and evidence that make it recognizable.</p>
               <div class="signal-cta"><button data-action="start-recovery">Report a stolen watch <span>→</span></button><a href="#how-it-works">How it works <span>↓</span></a></div>
-              <small>PRIVATE BY DESIGN · NEVER A PUBLIC WATCH REGISTRY</small>
+              <small>PRIVATE VAULT · OPTIONAL PUBLIC LOST &amp; FOUND REPORTS</small>
             </div>
             <div class="signal-art" role="img" aria-label="A watch dissolving into a city-at-night scene, with LockX evidence callouts"></div>
           </div>
@@ -145,5 +147,6 @@
     <div class="modal-backdrop" id="vaultConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vaultConfirmTitle"><div class="modal"><h2 id="vaultConfirmTitle">Confirm this change</h2><p id="vaultConfirmText"></p><div class="modal-footer"><button class="primary-button ghost" data-action="cancel-vault-confirm">Cancel</button><button class="primary-button" data-action="confirm-vault">Confirm</button></div></div></div>
     <div class="toast" id="toast"><span>✓</span><p><strong id="toastTitle">Case created</strong><br /><small id="toastText">Monitoring will begin shortly.</small></p></div>
     <script src="app.js"></script>
+    <script src="lost-found.js"></script>
   </body>
 </html>

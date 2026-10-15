@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from connectors import SearchProfile, configured_connectors, source_catalog
 from worker import scan_case
+from lost_found import create_router
 
 app = FastAPI()
 log = logging.getLogger("lockx.supabase")
@@ -554,3 +555,6 @@ def cancel_vault_transfer(transfer_id: str, owner_id=Depends(current_user)):
         raise HTTPException(404, "Pending transfer not found")
     transfer = rows[0]
     vault_mutate("cancel", owner_id, transfer["item_id"], transfer_id=transfer_id)
+
+
+app.include_router(create_router(current_user))
