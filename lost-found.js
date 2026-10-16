@@ -93,7 +93,7 @@
     if (currentUser !== user) {
       if(currentUser&&$('#lfModal').classList.contains('open'))closeModal();
       state.detail=null;
-      state.mine = [];state.matches = [];state.recoveryAlerts = [];
+      state.mine = [];state.matches = [];state.recoveryAlerts = [];state.monitorHealth=null;
       for (const url of urls.values()) URL.revokeObjectURL(url);
       urls.clear();currentUser = user;
     }
