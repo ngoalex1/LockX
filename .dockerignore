@@ -1,0 +1,9 @@
+.git
+.venv
+.env
+.env.*
+.lockx-data
+__pycache__
+.pytest_cache
+artifacts
+*.sqlite3*

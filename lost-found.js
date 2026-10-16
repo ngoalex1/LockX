@@ -19,7 +19,7 @@
     clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
   };
   const icon = name => `<svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.search}</svg>`;
-  const state = {tab:'discover', reports:[], mine:[], matches:[], capabilities:null, category:'', query:'', loading:true, error:'', detail:null};
+  const state = {tab:'discover', reports:[], mine:[], matches:[], capabilities:null, category:'', query:'', loading:true, error:'', detail:null, recoveryAlerts:[]};
   const urls = new Map();
   let lastFocus, activeLoad = 0, currentUser = null;
   function headers() { return typeof session !== 'undefined' && session ? {Authorization:'Bearer ' + session.access_token} : {}; }
@@ -93,18 +93,18 @@
     if (currentUser !== user) {
       if(currentUser&&$('#lfModal').classList.contains('open'))closeModal();
       state.detail=null;
-      state.mine = [];state.matches = [];
+      state.mine = [];state.matches = [];state.recoveryAlerts = [];
       for (const url of urls.values()) URL.revokeObjectURL(url);
       urls.clear();currentUser = user;
     }
     state.loading = true;state.error = '';render();
     try {
       const requests = [api('/public'), api('/capabilities')];
-      if (signedIn()) requests.push(api('/reports'), api('/matches'));
+      if (signedIn()) requests.push(api('/reports'), api('/matches'), api('/recovery-alerts'));
       const values = await Promise.all(requests);
       if (loadId !== activeLoad) return;
       [state.reports, state.capabilities] = values;
-      state.mine = values[2] || [];state.matches = values[3] || [];
+      state.mine = values[2] || [];state.matches = values[3] || [];state.recoveryAlerts=values[4]||[];
     } catch (error) {
       if (loadId !== activeLoad) return;
       state.error = error.message;
@@ -122,7 +122,7 @@
       [icon('phone'), caps?.sms_ready ? 'Configured' : 'Web intake ready', 'Text-to-find', caps?.sms_ready ? caps.sms_number : 'MMS number awaiting connection']
     ].map(([i,v,l,s])=>`<div class="lf-stat"><span class="lf-stat-icon">${i}</span><div><strong class="${v.length>5?'lf-word-stat':''}">${esc(v)}</strong><p>${l}</p><small>${esc(s)}</small></div></div>`).join('');
     $('#lfMineCount').textContent=state.mine.length;
-    $('#lfMatchCount').textContent=state.matches.filter(m=>!['dismissed','returned','withdrawn'].includes(m.status)).length;
+    $('#lfMatchCount').textContent=state.matches.filter(m=>!['dismissed','returned','withdrawn'].includes(m.status)).length+state.recoveryAlerts.length;
     document.querySelectorAll('[data-lf-tab]').forEach(b=>{b.classList.toggle('active', b.dataset.lfTab===state.tab);b.setAttribute('aria-selected', String(b.dataset.lfTab===state.tab));});
     let rows = state.tab==='mine'?state.mine:state.tab==='inbox'?state.matches:state.reports;
     rows = rows.filter(r=>(!state.category || (r.category || state.mine.find(x=>x.id===r.report_id)?.category)===state.category) && JSON.stringify([r.title,r.brand,r.model,r.location,r.details,r.report_title,r.sighting?.description]).toLowerCase().includes(state.query.toLowerCase()));
@@ -134,12 +134,13 @@
     else if (state.tab!=='discover' && !signedIn()) content='<div class="lf-empty"><span class="lf-empty-symbol">'+icon('shield')+'</span><h3>Your recovery workspace is private.</h3><p>Sign in to manage reports and review potential matches.</p><button class="primary-button" data-lf="signin">Sign in to LockX</button></div>';
     else if (!rows.length) content=`<div class="lf-empty"><span class="lf-empty-symbol">${icon(state.tab==='inbox'?'photo':'search')}</span><h3>${state.query||state.category?'No results for these filters.':state.tab==='inbox'?'The next lead could be the one.':state.tab==='mine'?'Give your missing item a way home.':'Every reunion starts with a report.'}</h3><p>${state.tab==='inbox'?'Relevant finder submissions will appear here. Refresh to check for new leads.':'Add identifying details and photos so the right person can recognize your item.'}</p><button class="primary-button" data-lf="${state.query||state.category?'clear':'report'}">${state.query||state.category?'Clear filters':'Report a missing item'}</button></div>`;
     else content = state.tab==='inbox'?`<div class="lf-inbox">${rows.map(matchCard).join('')}</div>`:`<div class="lf-cards">${rows.map(reportCard).join('')}</div>`;
+    if(state.tab==='inbox'&&signedIn()&&!state.loading&&!state.error&&state.recoveryAlerts.length) content='<div class="lf-inbox">'+state.recoveryAlerts.map(a=>`<article class="lf-lead"><div class="lf-lead-copy"><p class="eyebrow">MARKETPLACE PHOTO MATCH · ${esc(a.source)}</p><h3>${esc(a.listing.title)}</h3><p>${esc((a.comparison.reasons||[]).join(' · '))}</p><p>Visual similarity ${Math.round(a.comparison.score*100)} / 100. A lead for review; ownership is unverified.</p><a class="primary-button" href="${esc(/^https:\/\//.test(a.listing.url)?a.listing.url:'#')}" target="_blank" rel="noopener noreferrer">Review listing ↗</a></div></article>`).join('')+'</div>'+content;
     $('#lfContent').innerHTML = content;
     hydratePhotos($('#lfContent'));
   }
   function reportCard(r) {
     const thumb = r.photos?.[0];
-    return `<article class="lf-item-card"><button class="lf-item-image lf-art-${esc(r.category).toLowerCase()}" data-lf-detail="${esc(r.id)}" aria-label="View ${esc(r.title)}">${thumb?`<img data-photo="${esc(thumb)}" data-public="${r.publish && r.status==='active'?'true':'false'}" alt="${esc(r.title)}"/>`:itemArt(r.category)}<span class="lf-item-status ${r.incident==='stolen'?'lf-stolen':''}"><i></i>${r.status==='recovered'?'Returned':r.status==='archived'?'Archived':r.incident==='stolen'?'Reported stolen':'Missing'}</span><span class="lf-image-category">${esc(r.category)}</span></button><div class="lf-item-body"><p class="lf-item-brand">${esc(r.brand || r.category)}</p><h3><button data-lf-detail="${esc(r.id)}">${esc(r.title)}</button></h3><p class="lf-item-location">${icon('pin')} ${esc(r.location)}</p><div class="lf-item-footer"><div><small>REWARD PLEDGED</small><strong>${money(r.reward)}</strong></div><button data-lf-detail="${esc(r.id)}" aria-label="View ${esc(r.title)}">${icon('arrow')}</button></div></div></article>`;
+    return `<article class="lf-item-card"><button class="lf-item-image lf-art-${esc(r.category).toLowerCase()}" data-lf-detail="${esc(r.id)}" aria-label="View ${esc(r.title)}">${thumb?`<img data-photo="${esc(thumb)}" data-public="${r.publish && r.status==='active'?'true':'false'}" alt="${esc(r.title)}"/>`:itemArt(r.category)}<span class="lf-item-status ${r.incident==='stolen'?'lf-stolen':''}"><i></i>${r.status==='recovered'?'Returned':r.status==='archived'?'Archived':r.incident==='stolen'?'Reported stolen':'Missing'}</span><span class="lf-image-category">${esc(r.category)}</span></button><div class="lf-item-body"><p class="lf-item-brand">${esc(r.brand || r.category)}</p><h3><button data-lf-detail="${esc(r.id)}">${esc(r.title)}</button></h3><p class="lf-item-location">${icon('pin')} ${esc(r.location)}</p>${state.tab==='mine'?`<button class="lf-refresh" data-lf-monitor="${esc(r.id)}">${icon('clock')} Set up six-hour monitoring</button>`:''}<div class="lf-item-footer"><div><small>REWARD PLEDGED</small><strong>${money(r.reward)}</strong></div><button data-lf-detail="${esc(r.id)}" aria-label="View ${esc(r.title)}">${icon('arrow')}</button></div></div></article>`;
   }
   function matchCard(m) {
     const labels={new:'New lead',reviewing:'Under review',verified:'Owner verified',returned:'Returned',dismissed:'Dismissed',withdrawn:'No longer matches'};
@@ -255,7 +256,15 @@
       toast('Evidence export ready','The JSON file contains private records. Share it deliberately.');
     }catch(error){$('.lf-form-error',$('#lfModalBody')).textContent=error.message;}finally{button.disabled=false;}
   }
+  async function monitorDialog(id) {
+    try {
+      const m=await api('/reports/'+encodeURIComponent(id)+'/monitor');
+      openModal(`<p class="eyebrow">CONTINUOUS RECOVERY</p><h2 id="lfModalTitle">Keep looking. Every six hours.</h2><p>No automatic expiry. Monitoring stops while your report is archived or recovered.</p><p>Worker: ${m.worker_enabled?'enabled':'awaiting deployment'} · Photo comparison: ${m.vision_ready?'configured':'not configured'} · Email: ${m.email_ready?'configured':'not configured'}</p><p>${Object.entries(m.sources).map(([k,v])=>esc(k)+': '+esc(v)).join('<br>')}</p><p>Last run: ${m.last_run?esc(new Date(m.last_run*1000).toLocaleString())+' · '+esc(m.last_status):'Not run'}<br>Next due: ${m.enabled&&m.next_run?esc(new Date(m.next_run*1000).toLocaleString()):'Not scheduled'}</p><form id="lfMonitorForm" class="lf-form"><label>Search ZIP code<input name="postal" pattern="[0-9]{5}" maxlength="5" value="${esc(m.search_settings?.postal||'')}" placeholder="95111"></label><label>Craigslist radius (miles)<input name="radius" type="number" min="1" max="500" value="${esc(m.search_settings?.radius||50)}"></label><label>Saved Facebook search URL (optional)<input name="facebook_url" type="url" value="${esc(m.search_settings?.facebook_url||'')}" placeholder="Facebook controls its own location"></label><label class="lf-checkbox"><input name="enabled" type="checkbox" ${m.enabled?'checked':''}><span>Enable recurring searches</span></label><label>Notification email (optional)<input name="notification_email" type="email" maxlength="254" value="${esc(m.notification_email||'')}" placeholder="Leave blank for in-app alerts only"></label><label class="lf-checkbox"><input name="consent" type="checkbox" ${m.consent?'checked':''}><span>I authorize LockX to send my reference photos and candidate listing photos to its configured AI provider for comparison, and email close-match alerts to the address above.</span></label><p>Alerts require distinctive matching features. Same-model watches alone should not trigger an alert. Sources shown as not connected are not being searched.</p><p class="lf-form-error" role="alert"></p><button class="primary-button" type="submit">Save monitoring</button></form>`);
+      $('#lfMonitorForm').onsubmit=async e=>{e.preventDefault();const f=e.target,b=f.querySelector('button');b.disabled=true;try{await api('/reports/'+encodeURIComponent(id)+'/monitor',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:f.elements.enabled.checked,photo_analysis_consent:f.elements.consent.checked,notification_email:f.elements.notification_email.value,postal:f.elements.postal.value,radius:Number(f.elements.radius.value),facebook_url:f.elements.facebook_url.value,region:m.search_settings?.region||'www'})});closeModal();toast('Monitoring settings saved','Source and worker readiness determine when searches can run.');}catch(error){$('.lf-form-error',f).textContent=error.message;}finally{b.disabled=false;}};
+    }catch(error){toast('Could not load monitoring',error.message);}
+  }
   document.addEventListener('click',async event=>{
+    const monitor=event.target.closest('[data-lf-monitor]');if(monitor)await monitorDialog(monitor.dataset.lfMonitor);
     const action=event.target.closest('[data-lf]')?.dataset.lf;
     if(action==='close')closeModal();
     if(action==='report'&&location.protocol!=='file:')reportForm();

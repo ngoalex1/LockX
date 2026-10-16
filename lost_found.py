@@ -433,7 +433,7 @@ def create_router(authenticate):
         sms = all(os.getenv(k) for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "LOCKX_MMS_NUMBER", "LOCKX_MMS_WEBHOOK_URL"))
         return {"sms_ready": sms, "sms_number": os.getenv("LOCKX_MMS_NUMBER") if sms else None,
                 "vision_ready": bool(os.getenv("OPENAI_API_KEY") and os.getenv("LOCKX_VISION_MODEL")),
-                "reward_payments_ready": False, "max_photos": MAX_PHOTOS, "max_photo_mb": 5}
+                "reward_payments_ready": False, "max_photos": MAX_PHOTOS, "max_photo_mb": 5, "monitoring_configured": os.getenv("LOCKX_RECOVERY_WORKER") == "1"}
 
     @router.get("/public")
     def public_reports(q: str = "", category: str = "", limit: int = 50):

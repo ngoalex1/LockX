@@ -1,0 +1,2 @@
+# Optional scheduled public-page intake, separate from the API's normal dependencies.
+playwright==1.64.0

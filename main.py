@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os, hashlib, logging
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from recovery_monitor import create_router as recovery_router, worker_loop
 from datetime import date, datetime, timezone
 from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -12,9 +15,20 @@ from connectors import SearchProfile, configured_connectors, source_catalog
 from worker import scan_case
 from lost_found import create_router
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(worker_loop()) if os.getenv("LOCKX_RECOVERY_WORKER") == "1" else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+app = FastAPI(lifespan=lifespan)
 log = logging.getLogger("lockx.supabase")
-app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST", "PATCH"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST", "PATCH", "PUT"], allow_headers=["*"])
 
 class CaseCreate(BaseModel):
     brand: str
@@ -558,3 +572,5 @@ def cancel_vault_transfer(transfer_id: str, owner_id=Depends(current_user)):
 
 
 app.include_router(create_router(current_user))
+
+app.include_router(recovery_router(current_user))
