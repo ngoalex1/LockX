@@ -19,7 +19,7 @@
     clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
   };
   const icon = name => `<svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.search}</svg>`;
-  const state = {tab:'discover', reports:[], mine:[], matches:[], capabilities:null, category:'', query:'', loading:true, error:'', detail:null, recoveryAlerts:[]};
+  const state = {tab:'discover', reports:[], mine:[], matches:[], capabilities:null, category:'', query:'', loading:true, error:'', detail:null, recoveryAlerts:[], monitorHealth:null};
   const urls = new Map();
   let lastFocus, activeLoad = 0, currentUser = null;
   function headers() { return typeof session !== 'undefined' && session ? {Authorization:'Bearer ' + session.access_token} : {}; }
@@ -100,17 +100,27 @@
     state.loading = true;state.error = '';render();
     try {
       const requests = [api('/public'), api('/capabilities')];
-      if (signedIn()) requests.push(api('/reports'), api('/matches'), api('/recovery-alerts'));
+      if (signedIn()) requests.push(api('/reports'), api('/matches'), api('/recovery-alerts'), api('/monitoring-health'));
       const values = await Promise.all(requests);
       if (loadId !== activeLoad) return;
       [state.reports, state.capabilities] = values;
-      state.mine = values[2] || [];state.matches = values[3] || [];state.recoveryAlerts=values[4]||[];
+      state.mine = values[2] || [];state.matches = values[3] || [];state.recoveryAlerts=values[4]||[];state.monitorHealth=values[5]||null;
     } catch (error) {
       if (loadId !== activeLoad) return;
       state.error = error.message;
     } finally {
       if (loadId === activeLoad) {state.loading = false;render();}
     }
+  }
+  function workProof(h) {
+    const a=h?.activity,t=a?.totals||{},fmt=v=>v===undefined?'—':Number(v).toLocaleString();
+    const recent=a?.recent_runs||[],last=recent[0],stamp=v=>v?new Date(v*1000).toLocaleString():null;
+    const metrics=[['listings_checked','Listing checks','Across recorded scans; repeat checks included'],['photo_comparisons','Photo comparisons','Completed comparisons against owner photos'],['unchanged_skipped','Unchanged listings skipped','Previously reviewed details retained'],['new_flags','Close-match flags','Distinctive features sent for owner review']];
+    return `<div class="lf-work-proof"><div class="lf-proof-heading"><h3>The work behind your recovery.</h3><span>YOUR RECORDED ACTIVITY</span></div><div class="lf-proof-metrics">${metrics.map(([key,label,hint])=>`<div><strong>${fmt(t[key])}</strong><span>${label}</span><small>${hint}</small></div>`).join('')}</div><div class="lf-proof-sources">${Object.entries(last?.sources||h?.sources||{}).filter(([k])=>k!=='comparison_limit').map(([key,value])=>`<span><b>${esc(key==='facebook_marketplace'?'Facebook Marketplace':key==='ebay_browse'?'eBay':'Craigslist')}</b> ${esc(typeof value==='object'?(value.status==='completed'?fmt(value.count)+' cards retrieved':value.status.replaceAll('_',' ')):value.replaceAll('_',' '))}</span>`).join('')}</div><details class="lf-proof-receipts"><summary>Scan receipts ${recent.length?'· '+recent.length+' recent':''}</summary>${recent.length?recent.map(run=>`<div class="lf-scan-receipt"><time>${esc(stamp(run.started))}</time><span>${esc(run.status.replaceAll('_',' '))}</span><span>${fmt(run.summary.listings_checked||0)} listing checks · ${fmt(run.summary.photo_comparisons||0)} photo comparisons · ${fmt(run.summary.new_flags||0)} new flags</span></div>`).join(''):'<p>No scans recorded yet. Enable monitoring on a report with reference photos to begin.</p>'}</details><div class="lf-proof-timing"><span>Worker check-in: ${esc(stamp(h?.last_tick)||'awaiting confirmation')}</span><span>Next search due: ${esc(stamp(a?.next_due)||'enable a report to schedule')}</span></div></div>`;
+  }
+  function recoveryActivity() {
+    const h=state.monitorHealth, online=Boolean(h?.worker_healthy), watches=Number(h?.your_active_watches)||0;
+    return `<section class="lf-activity ${online?'is-online':''}" aria-label="LockX recovery monitoring workflow"><div class="lf-activity-head"><div><p class="eyebrow">YOUR RECOVERY NETWORK</p><h2>Always ready for the next lead.</h2></div><span class="lf-worker-state"><i></i>${online?'Worker online':h?'Worker awaiting confirmation':'Recovery workflow'}</span>${h?.browser_status==='browser_unavailable'?'<span class="lf-intake-blocked">Source intake blocked</span>':''}<button type="button" class="lf-motion-toggle" data-lf-motion aria-pressed="false" aria-label="Pause recovery animation">Pause animation</button></div><div class="lf-bot-flow"><div class="lf-flow-wire" aria-hidden="true"><span></span><span></span><span></span></div><div class="lf-flow-source"><span class="lf-flow-label">01 / DISCOVER</span><div class="lf-web-window"><div class="lf-web-bar"><i></i><i></i><i></i><span>Marketplace listings</span></div><div class="lf-web-photos"><span>${icon('photo')}</span><span>${icon('clock')}</span><span>${icon('photo')}</span><span>${icon('search')}</span></div><div class="lf-web-lines"><i></i><i></i></div><div class="lf-scan-beam"></div></div><p>Websites &amp; listing photos</p></div><div class="lf-flow-bot"><span class="lf-flow-label">02 / COMPARE</span><div class="lf-robot-stage" aria-hidden="true"><div class="lf-orbit"></div><div class="lf-robot"><div class="lf-robot-antenna"></div><div class="lf-robot-head"><div class="lf-robot-eyes"><i></i><i></i></div><div class="lf-robot-mouth"></div></div><div class="lf-robot-body"><span>X</span></div><div class="lf-robot-arm left"></div><div class="lf-robot-arm right"></div></div><span class="lf-robot-spark">✦</span></div><p>Compare distinctive details</p></div><div class="lf-flow-destination"><span class="lf-flow-label">03 / CONNECT</span><div class="lf-owner-row"><span class="lf-owner-avatar">A</span><div><strong>Lost item report</strong><small>Owner reference photos</small></div><i></i></div><div class="lf-owner-row"><span class="lf-owner-avatar">B</span><div><strong>Found item report</strong><small>Item details &amp; photos</small></div><i></i></div><div class="lf-owner-row"><span class="lf-owner-avatar">✓</span><div><strong>Owner’s match inbox</strong><small>Possible match for review</small></div><i></i></div><p>Route leads to the right account</p></div></div><div class="lf-activity-footer"><span>${icon('clock')} Searches scheduled every 6 hours</span><span>${online?watches+' active '+(watches===1?'watch':'watches'):'Status checked when signed in'}</span><small>Workflow illustration · movement does not represent live scans</small></div>${workProof(h)}${online&&!watches?`<div class="lf-activity-start">${h?.browser_status==='browser_unavailable'?'Marketplace intake needs connection. You can prepare your report now.':'Add an item with reference photos and enable monitoring to begin.'} <button type="button" data-lf="report">Add your missing item →</button></div>`:''}</section>`;
   }
   function render() {
     const caps = state.capabilities;
@@ -121,6 +131,7 @@
       [icon('photo'), caps?.vision_ready ? 'Configured' : 'Manual review', 'Photo identification', caps?.vision_ready ? 'Image analysis is configured' : 'Add details to help match photos'],
       [icon('phone'), caps?.sms_ready ? 'Configured' : 'Web intake ready', 'Text-to-find', caps?.sms_ready ? caps.sms_number : 'MMS number awaiting connection']
     ].map(([i,v,l,s])=>`<div class="lf-stat"><span class="lf-stat-icon">${i}</span><div><strong class="${v.length>5?'lf-word-stat':''}">${esc(v)}</strong><p>${l}</p><small>${esc(s)}</small></div></div>`).join('');
+    $('#lfPreview').insertAdjacentHTML('beforeend',recoveryActivity());
     $('#lfMineCount').textContent=state.mine.length;
     $('#lfMatchCount').textContent=state.matches.filter(m=>!['dismissed','returned','withdrawn'].includes(m.status)).length+state.recoveryAlerts.length;
     document.querySelectorAll('[data-lf-tab]').forEach(b=>{b.classList.toggle('active', b.dataset.lfTab===state.tab);b.setAttribute('aria-selected', String(b.dataset.lfTab===state.tab));});
@@ -264,6 +275,7 @@
     }catch(error){toast('Could not load monitoring',error.message);}
   }
   document.addEventListener('click',async event=>{
+    const motion=event.target.closest('[data-lf-motion]');if(motion){const paused=motion.closest('.lf-activity').classList.toggle('is-paused');motion.textContent=paused?'Play animation':'Pause animation';motion.setAttribute('aria-pressed',String(paused));motion.setAttribute('aria-label',paused?'Play recovery animation':'Pause recovery animation');}
     const monitor=event.target.closest('[data-lf-monitor]');if(monitor)await monitorDialog(monitor.dataset.lfMonitor);
     const action=event.target.closest('[data-lf]')?.dataset.lf;
     if(action==='close')closeModal();
@@ -303,4 +315,5 @@
   window.addEventListener('hashchange',()=>{if(['#lost-found','#found'].includes(location.hash)){go('lost-found');if(location.hash==='#found')finderForm();}});
   if(['#lost-found','#found'].includes(location.hash)||window.LOCKX_LOCAL_PREVIEW)go('lost-found');
   load().then(async()=>{const id=new URLSearchParams(location.search).get('item');if(id&&location.protocol!=='file:'){if(![...state.mine,...state.reports].some(r=>r.id===id)){try{state.reports.push(await api('/public/reports/'+encodeURIComponent(id)));}catch{toast('Listing unavailable','This report may be private, archived, or already recovered.');return;}}detail(id);}if(location.hash==='#found'&&location.protocol!=='file:')finderForm();});
+  setInterval(()=>{if(document.visibilityState==='visible'&&location.hash==='#lost-found'&&signedIn()&&!state.loading&&!$('#lfModal').classList.contains('open'))load();},60000);
 })();

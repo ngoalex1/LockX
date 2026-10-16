@@ -31,6 +31,9 @@ SOURCES = {'craigslist', 'facebook_marketplace', 'ebay_browse'}
 
 def initialize(db):
     db.executescript('''
+    CREATE TABLE IF NOT EXISTS recovery_runs (id TEXT PRIMARY KEY,report_id TEXT NOT NULL REFERENCES reports(id),started REAL NOT NULL,finished REAL,status TEXT NOT NULL,summary TEXT NOT NULL DEFAULT '{}',sources TEXT NOT NULL DEFAULT '{}');
+    CREATE INDEX IF NOT EXISTS recovery_runs_report ON recovery_runs(report_id,started);
+    CREATE TABLE IF NOT EXISTS recovery_browser_health (id INTEGER PRIMARY KEY CHECK(id=1),status TEXT NOT NULL,checked REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS recovery_runtime (id INTEGER PRIMARY KEY CHECK(id=1),last_tick REAL NOT NULL,last_status TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS recovery_watches (
       report_id TEXT PRIMARY KEY REFERENCES reports(id), enabled INTEGER NOT NULL,
@@ -93,11 +96,21 @@ def create_router(authenticate):
         with database() as db:
             initialize(db)
             tick = db.execute('SELECT * FROM recovery_runtime WHERE id=1').fetchone()
+            browser = db.execute('SELECT * FROM recovery_browser_health WHERE id=1').fetchone()
             active = db.execute("SELECT count(*) FROM recovery_watches w JOIN reports r ON r.id=w.report_id WHERE r.owner_id=? AND w.enabled=1 AND r.status='active'",(owner,)).fetchone()[0]
-        return {'worker_configured':os.getenv('LOCKX_RECOVERY_WORKER')=='1',
+            runs=db.execute('''SELECT j.* FROM recovery_runs j JOIN reports r ON r.id=j.report_id WHERE r.owner_id=? ORDER BY j.started DESC LIMIT 10''',(owner,)).fetchall()
+            keys=('listings_checked','photo_comparisons','unchanged_skipped','new_flags','comparison_failures')
+            columns=','.join("COALESCE(SUM(json_extract(j.summary,'$."+key+"')),0) AS "+key for key in keys)
+            totals=dict(db.execute('SELECT '+columns+' FROM recovery_runs j JOIN reports r ON r.id=j.report_id WHERE r.owner_id=?',(owner,)).fetchone())
+            upcoming=db.execute("SELECT min(w.next_run) FROM recovery_watches w JOIN reports r ON r.id=w.report_id WHERE r.owner_id=? AND w.enabled=1 AND r.status='active'",(owner,)).fetchone()[0]
+            recent=[{**dict(run),'summary':json.loads(run['summary']),'sources':json.loads(run['sources'])} for run in runs[:10]]
+        sources=source_readiness()
+        if browser and browser['status']!='available':
+            sources={key:(browser['status'] if value=='browser_configured' else value) for key,value in sources.items()}
+        return {'browser_status':browser['status'] if browser else 'not_checked','activity':{'totals':totals,'recent_runs':recent,'next_due':upcoming},'worker_configured':os.getenv('LOCKX_RECOVERY_WORKER')=='1',
                 'worker_healthy':bool(tick and time.time()-tick['last_tick']<180),
                 'last_tick':tick['last_tick'] if tick else None,'your_active_watches':active,
-                'sources':source_readiness(),'email_ready':bool(os.getenv('RESEND_API_KEY') and os.getenv('LOCKX_ALERT_FROM'))}
+                'sources':sources,'email_ready':bool(os.getenv('RESEND_API_KEY') and os.getenv('LOCKX_ALERT_FROM'))}
 
     @router.put('/reports/{report_id}/monitor')
     def configure(report_id: str, settings: WatchSettings, owner=Depends(authenticate)):
@@ -242,12 +255,19 @@ async def run_due(collector=collect, comparator=compare_photos, clock=time.time)
             data = json.loads(row[0])
             refs = [r[0] for r in db.execute('SELECT content FROM photos WHERE parent_id=? ORDER BY id', (report_id,))]
             watch = dict(db.execute('SELECT * FROM recovery_watches WHERE report_id=?', (report_id,)).fetchone())
+            db.execute("UPDATE recovery_runs SET status='interrupted',finished=? WHERE report_id=? AND status='running'",(clock(),report_id))
+            db.execute("INSERT INTO recovery_runs(id,report_id,started,status) VALUES(?,?,?,'running')",(token,report_id,clock()))
+        stats={k:0 for k in ('listings_checked','photo_comparisons','unchanged_skipped','new_flags','comparison_failures')}
         statuses, outcome = {}, 'failed'
         try:
             if not refs:
                 raise RuntimeError('reference_photos_missing')
             profile = SearchProfile(report_id, data.get('brand',''), data.get('model',''), None, data.get('serial'), data.get('details'))
             records, statuses = await collector(profile, json.loads(watch['search_settings'])) if collector is collect else await collector(profile)
+            records=list({(r['source'],r['external_id']):r for r in records}.values())
+            stats['listings_checked']=len(records)
+            with database() as db:
+                db.execute('UPDATE recovery_runs SET summary=?,sources=? WHERE id=?',(json.dumps(stats),json.dumps(statuses),token))
             errors = False
             # Limit work to fit a renewable claim. Remaining candidates are retried next run.
             comparisons = 0
@@ -259,6 +279,7 @@ async def run_due(collector=collect, comparator=compare_photos, clock=time.time)
                     digest = hashlib.sha256(json.dumps([listing, watch['threshold'], os.getenv('LOCKX_VISION_MODEL'), 'visual-v1'],sort_keys=True).encode() + b''.join(refs)).hexdigest()
                     old = db.execute('SELECT * FROM recovery_candidates WHERE report_id=? AND source=? AND external_id=?', (report_id,listing['source'],listing['external_id'])).fetchone()
                     if old and old['fingerprint'] == digest and old['status'] != 'comparison_failed':
+                        stats['unchanged_skipped']+=1
                         continue
                 if comparisons >= 100:
                     statuses['comparison_limit'] = 'deferred_remaining_candidates'
@@ -268,9 +289,11 @@ async def run_due(collector=collect, comparator=compare_photos, clock=time.time)
                     comparison = await asyncio.to_thread(comparator, refs, listing)
                     flagged = comparison['score'] >= watch['threshold'] and comparison['distinctive_match'] and not comparison['serial_conflict']
                     status = 'flagged' if flagged else 'compared'
+                    if listing.get('image_urls'):stats['photo_comparisons']+=1
                 except Exception:
                     log.exception('Visual comparison failed for report %s', report_id)
                     comparison, status, errors = None, 'comparison_failed', True
+                    stats['comparison_failures']+=1
                 with database() as db:
                     if not still_active(db, report_id, token):
                         break
@@ -280,13 +303,15 @@ async def run_due(collector=collect, comparator=compare_photos, clock=time.time)
                         listing=excluded.listing,comparison=excluded.comparison,status=excluded.status,updated=excluded.updated''',
                         (candidate_id,report_id,listing['source'],listing['external_id'],digest,json.dumps(listing),json.dumps(comparison),status,clock(),clock()))
                     if status == 'flagged':
-                        db.execute('INSERT OR IGNORE INTO recovery_alerts(id,candidate_id,created) VALUES(?,?,?)', (str(uuid4()),candidate_id,clock()))
+                        stats['new_flags']+=db.execute('INSERT OR IGNORE INTO recovery_alerts(id,candidate_id,created) VALUES(?,?,?)', (str(uuid4()),candidate_id,clock())).rowcount
+                    db.execute('UPDATE recovery_runs SET summary=? WHERE id=?',(json.dumps(stats),token))
             complete = [v for v in statuses.values() if isinstance(v,dict) and v.get('status') == 'completed']
             outcome = 'comparison_failed' if errors else 'partial' if complete and (len(complete) < len(SOURCES) or 'comparison_limit' in statuses) else 'completed' if complete else 'waiting_for_sources'
         except Exception:
             log.exception('Watch failed: %s', report_id)
         finally:
             with database() as db:
+                db.execute('UPDATE recovery_runs SET finished=?,status=?,summary=?,sources=? WHERE id=?',(clock(),outcome,json.dumps(stats),json.dumps(statuses),token))
                 db.execute('''UPDATE recovery_watches SET lease_until=0,lease_token=NULL,last_run=?,last_status=?,source_status=?,next_run=?
                     WHERE report_id=? AND lease_token=?''', (clock(),outcome,json.dumps(statuses),clock()+INTERVAL,report_id,token))
             processed += 1
@@ -332,8 +357,17 @@ async def worker_loop():
     log.warning('Recovery worker started; using API report storage; schedule interval is six hours')
     async with asyncio.TaskGroup() as group:
         group.create_task(worker_heartbeat())
+        checked_at=0
         while True:
             try:
+                if os.getenv('LOCKX_BROWSER_SEARCH')=='1' and time.time()-checked_at>=INTERVAL:
+                    from marketplace_browser import browser_runtime_check
+                    browser_status=await browser_runtime_check()
+                    checked_at=time.time()
+                    with database() as db:
+                        initialize(db)
+                        db.execute('INSERT INTO recovery_browser_health VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,checked=excluded.checked',(browser_status,checked_at))
+                    if browser_status!='available':log.warning('Marketplace browser runtime unavailable; source intake is blocked')
                 await run_due()
                 await asyncio.to_thread(deliver_alerts)
             except Exception:

@@ -103,3 +103,18 @@ async def collect_browser(profile, settings):
     except Exception:
         return [], {s:{'status':'browser_unavailable'} for s in ('craigslist','facebook_marketplace')}
     return records, statuses
+
+
+async def browser_runtime_check():
+    """Check sandboxed launch only; this makes no marketplace requests."""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return 'browser_dependency_missing'
+    try:
+        async with async_playwright() as p:
+            browser=await p.chromium.launch(headless=True,chromium_sandbox=True)
+            await browser.close()
+        return 'available'
+    except Exception:
+        return 'browser_unavailable'
