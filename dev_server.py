@@ -32,15 +32,15 @@ app.dependency_overrides[authenticated_identity] = lambda: {"id":"local-preview-
 @app.get("/", response_class=HTMLResponse)
 def index():
     html = (ROOT / "index.html").read_text()
-    return html.replace('<script src="app.js">', '<script>window.LOCKX_LOCAL_PREVIEW=true;window.LOCKX_API_BASE="/api/v1";</script><script src="app.js">')
+    return HTMLResponse(html.replace('<script src="app.js', '<script>window.LOCKX_LOCAL_PREVIEW=true;window.LOCKX_API_BASE="/api/v1";</script><script src="app.js'),headers={"Cache-Control":"no-store"})
 
 
 @app.get("/{asset}")
 def asset(asset: str):
-    if asset not in {"app.js", "styles.css", "lost-found.js", "lost-found.css", "landing.css", "landing-asset.css", "lockx-city-watch-hero.png"}:
+    if asset not in {"app.js", "styles.css", "lost-found.js", "lost-found.css", "landing.css", "landing-asset.css", "lockx-city-watch-hero.png", "in-hand.js", "in-hand.css"}:
         from fastapi import HTTPException
         raise HTTPException(404)
-    return FileResponse(ROOT / asset)
+    return FileResponse(ROOT / asset,headers={"Cache-Control":"no-store"})
 
 
 def seed_demo():

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from connectors import SearchProfile, configured_connectors, source_catalog
 from worker import scan_case
 from lost_found import create_router
+from in_hand import create_router as in_hand_router
 
 @asynccontextmanager
 async def lifespan(app):
@@ -28,7 +29,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 log = logging.getLogger("lockx.supabase")
-app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST", "PATCH", "PUT"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["https://lockx.ai", "https://www.lockx.ai"], allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"], allow_headers=["*"])
 
 class CaseCreate(BaseModel):
     brand: str
@@ -574,3 +575,5 @@ def cancel_vault_transfer(transfer_id: str, owner_id=Depends(current_user)):
 app.include_router(create_router(current_user))
 
 app.include_router(recovery_router(current_user))
+
+app.include_router(in_hand_router(current_user))

@@ -7,3 +7,5 @@ python-multipart>=0.0.9
 Pillow>=11.0.0
 twilio>=9.0.0
 python-dotenv>=1.0.0
+opencv-python-headless>=4.10,<5
+qrcode[pil]>=8.0,<9

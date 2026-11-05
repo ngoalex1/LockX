@@ -56,3 +56,7 @@ For a real deployment, host this frontend on Vercel or Cloudflare Pages; use an 
 ## Lost & Found
 
 Missing-item reports, finder photo intake, reward pledges, match review and returns are documented in [LOST_FOUND.md](LOST_FOUND.md).
+
+## In-hand confirmed
+
+No-login listing-photo verification with guided mobile camera capture and optional publication of QR-marked approved photos. See [IN_HAND.md](IN_HAND.md) for access links, configuration, and verification scope.
