@@ -71,6 +71,25 @@ def test_no_login_creation_and_private_management_link(setup):
         assert db.execute("SELECT digest FROM ih_access_keys WHERE request_id=?",(r["id"],)).fetchone()[0] != r["manage_key"]
 
 
+def test_railway_volume_is_used_without_explicit_data_directory(setup):
+    client,_,tmp,monkeypatch=setup
+    monkeypatch.delenv("LOCKX_DATA_DIR")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID","production-test")
+    monkeypatch.setenv("RAILWAY_VOLUME_MOUNT_PATH",str(tmp/"mounted-volume"))
+    response=client.get(BASE+"/requests",headers={"X-LockX-Guest-Key":secrets.token_urlsafe(32)})
+    assert response.status_code==200 and response.json()==[]
+    assert (tmp/"mounted-volume"/"lockx"/"in-hand.sqlite3").exists()
+
+
+def test_railway_without_persistent_storage_returns_service_error(setup):
+    client,_,_,monkeypatch=setup
+    monkeypatch.delenv("LOCKX_DATA_DIR")
+    monkeypatch.delenv("RAILWAY_VOLUME_MOUNT_PATH",raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID","production-test")
+    response=client.get(BASE+"/requests",headers={"X-LockX-Guest-Key":secrets.token_urlsafe(32)})
+    assert response.status_code==503 and "persistent storage" in response.json()["detail"]
+
+
 def test_guest_browser_access_is_private_and_management_keys_are_per_inspection(setup):
     client,*_=setup
     browser={"X-LockX-Guest-Key":secrets.token_urlsafe(32)}

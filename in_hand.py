@@ -33,7 +33,10 @@ MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 6, 60 * 1024 * 1024, 4
 
 @contextmanager
 def database():
-    root = Path(os.getenv("LOCKX_DATA_DIR", ".lockx-data"))
+    configured, mount = os.getenv("LOCKX_DATA_DIR"), os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    if os.getenv("RAILWAY_ENVIRONMENT_ID") and not (configured or mount):
+        raise HTTPException(503,"In-hand verification requires persistent storage before accepting photos")
+    root = Path(configured or (str(Path(mount) / "lockx") if mount else ".lockx-data"))
     root.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(root / "in-hand.sqlite3", timeout=20)
     db.row_factory = sqlite3.Row
