@@ -128,6 +128,8 @@ class ScanProgress(Progress):
 
 class ScanFinish(Capture):
     chunk_count: int = Field(ge=1, le=SCAN_MAX_CHUNKS)
+    allow_incomplete: bool = False
+    recording_seconds: float | None = Field(default=None, ge=9.5, le=SCAN_MAX_SECONDS, allow_inf_nan=False)
 
 
 class ScanGroup(BaseModel):
@@ -573,6 +575,8 @@ def examine_video(content, session):
 
 def examine_scan_video(content, session):
     """Decode the complete assembled take; advisory preview uploads are never evidence."""
+    stages = json.loads(session["stages"])
+    fixed_video = len(stages) == 1 and stages[0].get("id") == "video-ten-second"
     with tempfile.NamedTemporaryFile(suffix=".mp4") as temp:
         temp.write(content)
         temp.flush()
@@ -585,7 +589,7 @@ def examine_scan_video(content, session):
                 raise HTTPException(415,"This recording could not be decoded. Record again in Safari or Chrome.")
             if width * height > 9_000_000:
                 raise HTTPException(422,"Record at 1080p or lower.")
-            decoded, candidates = 0, []
+            decoded, candidates, next_fixed_sample = 0, [], 0.0
             sample_every = max(1,round(fps/2))
             while True:
                 ok, frame = cap.read()
@@ -594,7 +598,11 @@ def examine_scan_video(content, session):
                 decoded += 1
                 if decoded/fps > session["scan_max_seconds"] + 12:
                     raise HTTPException(422,"Keep the continuous camera scan within ninety seconds.")
-                if (decoded-1) % sample_every == 0:
+                seconds = (decoded-1)/fps
+                should_sample = seconds+1e-6 >= next_fixed_sample if fixed_video else (decoded-1) % sample_every == 0
+                if should_sample:
+                    if fixed_video:
+                        next_fixed_sample += .5
                     h,w = frame.shape[:2]
                     scale = min(1,1100/max(h,w))
                     if scale < 1:
@@ -602,27 +610,43 @@ def examine_scan_video(content, session):
                     ok,jpeg = cv2.imencode(".jpg",frame,[cv2.IMWRITE_JPEG_QUALITY,88])
                     if not ok:
                         raise HTTPException(415,"A camera frame could not be decoded")
-                    candidates.append(((decoded-1)/fps,jpeg.tobytes()))
+                    candidates.append((seconds,jpeg.tobytes()))
             duration = decoded/fps
             # MP4 normally has an exact count; streaming WebM can omit or invent it.
+            # Browser MP4 encoders may leave a short padded tail at stop; the
+            # actual decoded duration must still meet the fixed-video bounds.
+            frame_count_tolerance = max(3,round(fps*.5)) if fixed_video else 2
             if (math.isfinite(declared_count) and 1 <= declared_count <= fps*(session["scan_max_seconds"]+12)
-                    and decoded+2 < declared_count):
+                    and decoded+frame_count_tolerance < declared_count):
                 raise HTTPException(415,"The camera recording is truncated. Start a fresh scan.")
-            if not session["scan_min_seconds"]-1 <= duration <= session["scan_max_seconds"]+12:
+            minimum = 9.5 if fixed_video else session["scan_min_seconds"]
+            if not minimum <= duration <= session["scan_max_seconds"]:
                 raise HTTPException(422,"The recording does not contain a complete continuous camera scan.")
             if not candidates or not session.get("finished"):
                 raise HTTPException(422,"Complete the continuous scan before uploading.")
-            if abs(duration-(session["finished"]-session["started"])) > 12:
-                raise HTTPException(422,"The recording duration does not match this camera session. Start a fresh scan.")
             observations = json.loads(session["observations"])
-            points = [(max(0,float(o.get("recording_seconds",o["seconds"]))-.3),o["label"]) for o in observations]
-            points += [(duration*fraction,"Continuity sample") for fraction in (.12,.35,.6,.85)]
+            # A recording may have stopped before its final pieces finished uploading.
+            # This hint only checks duration; approval still uses decoded camera frames.
+            ending = next((o for o in reversed(observations) if o.get("recording_end")), None)
+            expected_duration = ending["recording_seconds"] if ending else session["finished"]-session["started"]
+            if abs(duration-expected_duration) > 12:
+                raise HTTPException(422,"The recording duration does not match this camera session. Start a fresh scan.")
             frames, quality_checks = [], []
-            for seconds,label in sorted(points):
-                actual,photo = min(candidates,key=lambda sample:abs(sample[0]-seconds))
+            if fixed_video:
+                samples = [(seconds,photo,f"Video evidence at {seconds:.2f}s") for seconds,photo in candidates]
+            else:
+                points = [(max(0,float(o.get("recording_seconds",o["seconds"]))-.3),o["label"]) for o in observations]
+                points += [(duration*fraction,"Continuity sample") for fraction in (.12,.35,.6,.85)]
+                samples = []
+                for seconds,label in sorted(points):
+                    actual,photo = min(candidates,key=lambda sample:abs(sample[0]-seconds))
+                    samples.append((actual,photo,label))
+            for actual,photo,label in samples:
                 frames.append((round(actual,2),photo,label))
                 quality_checks.append(frame_quality(photo))
             notes = []
+            if any(o.get("partial_capture") for o in observations):
+                notes.append("Capture ended before every required view was collected.")
             if sum(bool(q["feedback"]) for q in quality_checks) > len(quality_checks)/2:
                 notes.append("Most sampled views have lighting or focus issues.")
             if any(o.get("quality_override") for o in observations):
@@ -722,7 +746,10 @@ def analyze(request_id):
         # Digital presentation cannot confirm possession of exclusive ticket rights.
         if json.loads(row["listing"])["capture_mode"] == "digital" and result == "confirmed":
             result = "inconclusive"
-        analysis.update(visual=visual.model_dump(), result=result, summary=visual.summary)
+        summary = visual.summary
+        if "Capture ended before every required view was collected." in analysis["video"].get("notes",[]):
+            summary = "Capture ended before every required view was collected. " + summary
+        analysis.update(visual=visual.model_dump(), result=result, summary=summary)
         with database() as db:
             db.execute("UPDATE ih_requests SET status=?,analysis_status='complete',analysis=? WHERE id=?", (result,json.dumps(analysis),request_id))
             event(db, request_id, "Selected photos and written claims compared with server-extracted video frames")
@@ -741,7 +768,9 @@ def marked_photo(content, publication_id, captured):
     import qrcode
     origin = os.getenv("LOCKX_PUBLIC_APP_ORIGIN", "https://lockx.ai").rstrip("/")
     link = origin + "/#in-hand/verify/" + publication_id
-    code = qrcode.QRCode(box_size=5,border=4,error_correction=qrcode.constants.ERROR_CORRECT_M)
+    # A fixed, standards-compliant mask avoids auto-selected patterns that some
+    # image decoders misread against the exported photo/footer composition.
+    code = qrcode.QRCode(box_size=5,border=4,error_correction=qrcode.constants.ERROR_CORRECT_M,mask_pattern=0)
     code.add_data(link)
     code.make(fit=True)
     # Integer-sized modules and a quiet border survive JPEG export and phone scanning.
@@ -797,7 +826,7 @@ def create_router(authenticate):
     def capabilities():
         return {"visual_comparison_ready":visual_ready(),"max_photos":MAX_PHOTOS,"max_photo_mb":5,"max_video_mb":60,"minimum_stage_seconds":STAGE_SECONDS,"camera_only":True,
                 "continuous_scan":True,"min_capture_seconds":SCAN_MIN_SECONDS,"max_capture_seconds":SCAN_MAX_SECONDS,
-                "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS}
+                "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10}
 
     @router.post("/requests/{request_id}/publish",status_code=201)
     def publish(request_id: str, data: Publication, owner=Depends(access)):
@@ -915,6 +944,32 @@ def create_router(authenticate):
             available(row)
             return view(db,row)
 
+    @router.get("/seller/{token}/result")
+    def seller_result(token: str):
+        """Read-only findings for the person who made this camera recording."""
+        with database() as db:
+            cleanup_scan_media(db,time.time())
+            row = seller(db,token)
+            available(row)
+            analysis = json.loads(row["analysis"] or "{}")
+            count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]
+            findings = {}
+            visual = analysis.get("visual") or {}
+            for photo in visual.get("photos") or []:
+                if not isinstance(photo,dict):
+                    continue
+                index = photo.get("photo_index")
+                if type(index) is int and 0 <= index < count and photo.get("finding") in {"supported","contradicted","not_established"}:
+                    findings[index] = {"photo_index":index,"finding":photo["finding"],"evidence":str(photo.get("evidence") or "")}
+            current_status = status(row)
+            pending = current_status in {"waiting","capturing","processing"}
+            fallback = "Awaiting comparison with the camera recording." if pending else "A match has not been established for this photo."
+            return {"id":row["id"],"status":current_status,"analysis_status":row["analysis_status"],
+                    "summary":str(analysis.get("summary") or ("Complete the camera scan to compare these photos." if pending else "An item match has not been established.")),
+                    "result":analysis.get("result") if analysis.get("result") in {"confirmed","mismatch","inconclusive"} else "inconclusive",
+                    "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
+                    "scope":SCOPE}
+
     @router.post("/seller/{token}/scan/start")
     def scan_start(token: str):
         with database() as db:
@@ -943,6 +998,43 @@ def create_router(authenticate):
             sess = db.execute("SELECT * FROM ih_sessions WHERE id=?",(sid,)).fetchone()
             meta = db.execute("SELECT * FROM ih_scan_sessions WHERE session_id=?",(sid,)).fetchone()
             return scan_stage_view(sess,meta)
+
+    @router.post("/seller/{token}/video/start")
+    def video_start(token: str):
+        """One fixed recording; every photo is compared after the camera stops."""
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            cleanup_scan_media(db,now)
+            row = seller(db,token)
+            available(row)
+            if row["status"] not in {"waiting","capturing"}:
+                raise HTTPException(409,"This inspection has already been submitted")
+            limited("in-hand-start:"+row["id"],12)
+            listing = Listing.model_validate_json(row["listing"])
+            count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]
+            movements = {
+                "handheld":["Slowly turn the same item from its front to its back, keeping it in view.",
+                            "Slowly turn the same item from its back to its front, keeping it in view."],
+                "flat":["Show the front, slowly flip the same item over, then show its back.",
+                        "Show the back, slowly flip the same item over, then show its front."],
+                "stationary":["Slowly move your phone from the front toward the left side of the same item. Do not move a heavy item.",
+                              "Slowly move your phone from the front toward the right side of the same item. Do not move a heavy item."],
+                "digital":["Slowly tilt the second screen left, then right, while keeping the visible listing details in focus. Hide usable barcodes.",
+                           "Slowly tilt the second screen right, then left, while keeping the visible listing details in focus. Hide usable barcodes."]}
+            stage = {"id":"video-ten-second","label":"Record the item for ten seconds",
+                     "instruction":secrets.choice(movements[listing.capture_mode]),"photo_indices":list(range(count)),
+                     "photo_index":0,"kind":"motion","minimum_seconds":10}
+            sid = secrets.token_urlsafe(24)
+            db.execute("INSERT INTO ih_sessions(id,request_id,started,issued,stages) VALUES (?,?,?,?,?)",
+                       (sid,row["id"],now,now,json.dumps([stage])))
+            db.execute("INSERT INTO ih_scan_sessions(session_id,min_seconds,max_seconds) VALUES (?,?,?)",(sid,10,15))
+            db.execute("UPDATE ih_requests SET status='capturing',session_id=? WHERE id=?",(sid,row["id"]))
+            cleanup_scan_media(db,now)
+            event(db,row["id"],"Fresh ten-second continuous item recording started")
+            sess = db.execute("SELECT * FROM ih_sessions WHERE id=?",(sid,)).fetchone()
+            meta = db.execute("SELECT * FROM ih_scan_sessions WHERE session_id=?",(sid,)).fetchone()
+            return {**scan_stage_view(sess,meta),"recording_seconds":10}
 
     @router.post("/seller/{token}/scan/progress")
     def scan_progress(token: str, data: ScanProgress, background: BackgroundTasks):
@@ -1064,8 +1156,25 @@ def create_router(authenticate):
                 if meta["chunk_count"] == data.chunk_count and row["submitted"]:
                     return view(db,row)
                 raise HTTPException(409,"This camera scan has already been submitted")
-            if row["status"] != "capturing" or not sess["finished"] or sess["position"] != len(json.loads(sess["stages"])):
+            if row["status"] != "capturing":
                 raise HTTPException(409,"Complete the guided camera scan first")
+            stages = json.loads(sess["stages"])
+            fixed_video = len(stages) == 1 and stages[0].get("id") == "video-ten-second"
+            complete = bool(sess["finished"]) and sess["position"] == len(stages)
+            observations = json.loads(sess["observations"])
+            if fixed_video:
+                if (time.time()-sess["started"] < 10 or data.recording_seconds is None
+                        or not 9.5 <= data.recording_seconds <= 15):
+                    raise HTTPException(422,"Record the item for ten seconds before sending it for comparison.")
+            elif data.recording_seconds is not None and data.recording_seconds < meta["min_seconds"]:
+                raise HTTPException(422,"Keep the continuous camera scan running for at least twelve seconds.")
+            if not complete and not fixed_video:
+                if not data.allow_incomplete:
+                    raise HTTPException(409,"Complete the guided camera scan first")
+                if time.time()-sess["started"] < meta["min_seconds"] or data.recording_seconds is None:
+                    raise HTTPException(422,"Keep the recording running for at least twelve seconds before sending it for review.")
+            if data.recording_seconds is not None and data.recording_seconds > time.time()-sess["started"]+12:
+                raise HTTPException(422,"The recording time does not match this camera scan.")
             if time.time()-sess["started"] > meta["max_seconds"]+300:
                 raise HTTPException(410,"This scan upload timed out. Start a fresh scan.")
             limited("in-hand-upload:"+row["id"],8)
@@ -1081,6 +1190,12 @@ def create_router(authenticate):
             digest = hashlib.sha256(content).hexdigest()
             if db.execute("SELECT 1 FROM ih_media WHERE role='video' AND sha256=?",(digest,)).fetchone():
                 raise HTTPException(409,"This exact recording was already used. Make a fresh recording.")
+            if data.recording_seconds is not None:
+                observations.append({"label":"Recording end","seconds":round(time.time()-sess["started"],2),
+                                     "recording_seconds":data.recording_seconds,"recording_end":True,
+                                     "partial_capture":not complete and not fixed_video})
+                db.execute("UPDATE ih_sessions SET observations=?,finished=COALESCE(finished,?),position=? WHERE id=?",
+                           (json.dumps(observations),time.time(),1 if fixed_video else sess["position"],data.session_id))
             store_media(db,row["id"],"video",mime,content)
             analysis = {"result":"inconclusive","summary":"Recording received. Checking every selected photo and listing claim."}
             db.execute("UPDATE ih_requests SET status='processing',submitted=?,analysis_status='decoding',analysis=? WHERE id=?",(time.time(),json.dumps(analysis),row["id"]))
