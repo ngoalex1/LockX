@@ -1620,6 +1620,22 @@ def release_result_stream(request_id):
             _active_streams.pop(request_id,None)
 
 
+class ResultStreamAdmission:
+    """Release even if a disconnect prevents the iterator's first iteration."""
+    def __init__(self, request_id):
+        self.request_id, self.released = request_id, True
+        admit_result_stream(request_id)
+        self.released = False
+
+    def close(self):
+        if not self.released:
+            self.released = True
+            release_result_stream(self.request_id)
+
+    def __del__(self):
+        self.close()
+
+
 async def iter_seller_result_events(token, request, initial_state=None, admission=None):
     """Bounded read-only updates. The normal GET owns publication recovery."""
     started = last_heartbeat = perf_counter()
@@ -1646,7 +1662,7 @@ async def iter_seller_result_events(token, request, initial_state=None, admissio
         yield 'event: close\ndata: {"reason":"timeout"}\n\n'
     finally:
         if admission is not None:
-            release_result_stream(admission)
+            admission.close() if isinstance(admission,ResultStreamAdmission) else release_result_stream(admission)
 
 
 def marked_zip(publication, images):
@@ -1822,8 +1838,8 @@ def create_router(authenticate):
             available(row)
             request_id = row["id"]
         initial = seller_event_state(token)
-        admit_result_stream(request_id)
-        return StreamingResponse(iter_seller_result_events(token,request,initial,request_id),media_type="text/event-stream",
+        admission = ResultStreamAdmission(request_id)
+        return StreamingResponse(iter_seller_result_events(token,request,initial,admission),media_type="text/event-stream",
             headers={"Cache-Control":"private, no-store","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff"})
 
     @router.post("/seller/{token}/retry-capture",status_code=201)

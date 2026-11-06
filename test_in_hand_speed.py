@@ -1,6 +1,7 @@
 """Faster delivery and rendering must preserve evidence and capability boundaries."""
 
 import asyncio
+import gc
 import json
 import sqlite3
 import threading
@@ -510,3 +511,30 @@ def test_result_stream_limits_are_bounded_per_capture_and_globally():
         with ih._stream_lock:
             ih._active_streams.clear()
             ih._active_streams.update(saved)
+
+
+def test_disconnected_stream_before_first_iteration_releases_admission():
+    request_id="unstarted-result-stream"
+    admission=ih.ResultStreamAdmission(request_id)
+    stream=ih.iter_seller_result_events("unused-token",StreamRequest(),admission=admission)
+    del admission
+    # A close before the first iteration never enters the generator's finally.
+    asyncio.run(stream.aclose())
+    del stream
+    gc.collect()
+    with ih._stream_lock:
+        assert request_id not in ih._active_streams
+
+
+def test_stream_admission_cleanup_does_not_release_another_live_connection():
+    request_id="two-result-stream-leases"
+    first=ih.ResultStreamAdmission(request_id)
+    second=ih.ResultStreamAdmission(request_id)
+    first.close();first.close()
+    del first
+    gc.collect()
+    with ih._stream_lock:
+        assert ih._active_streams[request_id]==1
+    second.close()
+    with ih._stream_lock:
+        assert request_id not in ih._active_streams
