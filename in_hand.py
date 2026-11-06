@@ -66,6 +66,9 @@ def database():
       CREATE TABLE IF NOT EXISTS ih_publications (
         id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE REFERENCES ih_requests(id),
         created REAL NOT NULL, revoked REAL);
+      CREATE TABLE IF NOT EXISTS ih_publication_jobs (
+        request_id TEXT PRIMARY KEY REFERENCES ih_requests(id),
+        state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, updated REAL NOT NULL);
       CREATE TABLE IF NOT EXISTS ih_live_checks (
         session_id TEXT NOT NULL REFERENCES ih_sessions(id), stage_id TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session_id,stage_id));
@@ -105,6 +108,9 @@ class Listing(BaseModel):
     details: str = Field(default="", max_length=1200)
     photo_notes: list[str] = Field(default_factory=list, max_length=MAX_PHOTOS)
     consent: Literal[True]
+    # Explicit authorization supplied with the initial photo-upload consent.
+    # Existing inspections retain their private, manual-publication behavior.
+    auto_publish: bool = Field(default=False, strict=True)
 
 
 class Progress(BaseModel):
@@ -263,7 +269,7 @@ def available(row):
 def view(db, row, private=False):
     listing = json.loads(row["listing"])
     media = [dict(m) for m in db.execute("SELECT id,role,mime,sha256,seconds,label FROM ih_media WHERE request_id=? ORDER BY rowid", (row["id"],))]
-    result = {"id": row["id"], **{k:v for k,v in listing.items() if k != "consent"},
+    result = {"id": row["id"], **{k:v for k,v in listing.items() if k != "consent" and (k != "auto_publish" or v is True)},
               "status": status(row), "created": row["created"], "expires": row["expires"],
               "submitted": row["submitted"], "media": media if private else [m for m in media if m["role"] == "listing"]}
     if private:
@@ -271,6 +277,8 @@ def view(db, row, private=False):
                       events=[dict(e) for e in db.execute("SELECT name,created FROM ih_events WHERE request_id=? ORDER BY rowid", (row["id"],))])
         publication = db.execute("SELECT id,created,revoked FROM ih_publications WHERE request_id=?", (row["id"],)).fetchone()
         result["publication"] = dict(publication) if publication else None
+        if listing.get("auto_publish") is True:
+            result["publication_status"] = seller_publication(db,row)["publication_status"]
     return result
 
 
@@ -993,6 +1001,8 @@ def analyze(request_id):
         with database() as db:
             db.execute("UPDATE ih_requests SET status=?,analysis_status='complete',analysis=? WHERE id=?", (result,json.dumps(analysis),request_id))
             event(db, request_id, "Selected photos and written claims compared with server-extracted video frames")
+            if result == "confirmed" and listing.get("auto_publish") is True:
+                db.execute("INSERT OR IGNORE INTO ih_publication_jobs VALUES (?,'pending',0,?)", (request_id,time.time()))
     except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
         log.warning("Visual comparison failed for %s", request_id)
         # Diagnostics remain in the capability-protected management response;
@@ -1008,6 +1018,9 @@ def analyze(request_id):
         analysis.update(result="inconclusive",summary="The recording is preserved, but the automated comparison could not be completed.")
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?", (json.dumps(analysis),request_id))
+    # Rendering a QR export must never turn a valid AI comparison into a failed
+    # comparison. Publication has its own bounded, separately committed outcome.
+    auto_publish_confirmed(request_id)
 
 
 SCOPE = "Visual correspondence with the selected photos at the recorded time. This does not certify product authenticity, ownership, present possession, ticket validity, or delivery."
@@ -1018,31 +1031,130 @@ def marked_photo(content, publication_id, captured):
     import qrcode
     origin = os.getenv("LOCKX_PUBLIC_APP_ORIGIN", "https://lockx.ai").rstrip("/")
     link = origin + "/#in-hand/verify/" + publication_id
-    # A fixed, standards-compliant mask avoids auto-selected patterns that some
-    # image decoders misread against the exported photo/footer composition.
-    code = qrcode.QRCode(box_size=5,border=4,error_correction=qrcode.constants.ERROR_CORRECT_M,mask_pattern=0)
-    code.add_data(link)
-    code.make(fit=True)
-    # Integer-sized modules and a quiet border survive JPEG export and phone scanning.
-    qr = code.make_image(fill_color="black",back_color="white").convert("RGB")
     picture = Image.open(io.BytesIO(content)).convert("RGB")
-    width = max(800, picture.width, qr.width+580)
-    height = round(picture.height * width / picture.width)
-    picture = picture.resize((width, height))
-    footer = max(250,qr.height+40)
-    canvas = Image.new("RGB", (width, height + footer), "#163d34")
-    canvas.paste(picture, (0, 0))
-    canvas.paste(qr, (width-qr.width-20,height+(footer-qr.height)//2))
-    draw = ImageDraw.Draw(canvas)
     large, small = ImageFont.load_default(size=28), ImageFont.load_default(size=20)
-    draw.text((24, height + 28), "LockX In-hand verified", font=large, fill="white")
     date = time.strftime("%b %d, %Y %H:%M UTC", time.gmtime(captured))
-    draw.text((24, height + 80), "Photo match observed · " + date, font=small, fill="#d4e7df")
-    draw.text((24, height + 119), "ID: " + publication_id, font=small, fill="#d4e7df")
-    draw.text((24, height + 157), "Scan to confirm the photo set at LockX", font=small, fill="#d4e7df")
+    # Validate the actual exported JPEG, including the surrounding photograph.
+    # A valid QR matrix alone is insufficient: its mask can interact with nearby
+    # photo shapes and defeat a full-image detector. Usually the first mask works.
+    # Larger source photos receive proportionally larger, integer-sized modules.
+    module_size = max(5, math.ceil(picture.width / 200))
+    detector = cv2.QRCodeDetector()
+    for box_size in (module_size,module_size+2):
+        for mask in range(8):
+            code = qrcode.QRCode(box_size=box_size,border=4,error_correction=qrcode.constants.ERROR_CORRECT_M,mask_pattern=mask)
+            code.add_data(link)
+            code.make(fit=True)
+            qr = code.make_image(fill_color="black",back_color="white").convert("RGB")
+            width = max(800, picture.width, qr.width+580)
+            height = round(picture.height * width / picture.width)
+            footer = max(250,qr.height+40)
+            canvas = Image.new("RGB", (width, height + footer), "#163d34")
+            canvas.paste(picture.resize((width,height)), (0,0))
+            canvas.paste(qr, (width-qr.width-20,height+(footer-qr.height)//2))
+            draw = ImageDraw.Draw(canvas)
+            draw.text((24, height + 28), "LockX In-hand verified", font=large, fill="white")
+            draw.text((24, height + 80), "Photo match observed · " + date, font=small, fill="#d4e7df")
+            draw.text((24, height + 119), "ID: " + publication_id, font=small, fill="#d4e7df")
+            draw.text((24, height + 157), "Scan to confirm the photo set at LockX", font=small, fill="#d4e7df")
+            output = io.BytesIO()
+            canvas.save(output, "JPEG", quality=92)
+            exported = output.getvalue()
+            image = cv2.imdecode(np.frombuffer(exported,np.uint8),cv2.IMREAD_COLOR)
+            decoded,_,_ = detector.detectAndDecode(image)
+            if decoded == link:
+                return exported
+    raise ValueError("The exported QR image could not be read reliably")
+
+
+def publish_confirmed_photos(db, row):
+    """Create one atomic marked set; the caller owns the write transaction."""
+    if (row["status"] != "confirmed" or row["analysis_status"] != "complete"
+            or json.loads(row["listing"]).get("capture_mode") == "digital"):
+        raise HTTPException(409,"Only a confirmed physical photo set can receive a public verification marking")
+    prior = db.execute("SELECT * FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
+    if prior:
+        if prior["revoked"]:
+            raise HTTPException(409,"This record was withdrawn. Create a new inspection to publish again.")
+        return prior["id"]
+    refs = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
+    session = db.execute("SELECT finished FROM ih_sessions WHERE id=?",(row["session_id"],)).fetchone()
+    if not refs or not session or session["finished"] is None:
+        raise HTTPException(409,"A completed item recording is required before marking photos")
+    publication_id = secrets.token_hex(8)
+    # Only the approved listing photos enter the public set; private video,
+    # findings, capture tokens, and management capabilities never do.
+    for i,photo in enumerate(refs):
+        store_media(db,row["id"],"marked","image/jpeg",marked_photo(photo[0],publication_id,session["finished"]),label=f"Verified photo {i+1}")
+    db.execute("INSERT INTO ih_publications VALUES (?,?,?,NULL)",(publication_id,row["id"],time.time()))
+    event(db,row["id"],"Approved photo set and its verification record published")
+    return publication_id
+
+
+def auto_publish_confirmed(request_id):
+    """At most two rendering attempts, without repeating the AI comparison."""
+    for _ in range(2):
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
+            if (not row or json.loads(row["listing"]).get("auto_publish") is not True
+                    or row["status"] != "confirmed" or row["analysis_status"] != "complete"
+                    or json.loads(row["listing"]).get("capture_mode") == "digital"):
+                return
+            prior = db.execute("SELECT * FROM ih_publications WHERE request_id=?",(request_id,)).fetchone()
+            if prior:
+                # An owner's withdrawal is permanent for this inspection.
+                return
+            job = db.execute("SELECT * FROM ih_publication_jobs WHERE request_id=?",(request_id,)).fetchone()
+            if job and (job["attempts"] >= 2 or (job["state"] == "processing" and job["updated"] > time.time()-120)):
+                return
+            attempts = (job["attempts"] if job else 0) + 1
+            db.execute("INSERT INTO ih_publication_jobs VALUES (?,'processing',?,?) ON CONFLICT(request_id) DO UPDATE SET state='processing',attempts=excluded.attempts,updated=excluded.updated",(request_id,attempts,time.time()))
+        try:
+            with database() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
+                publish_confirmed_photos(db,row)
+                db.execute("UPDATE ih_publication_jobs SET state='ready',updated=? WHERE request_id=?",(time.time(),request_id))
+            return
+        except Exception:
+            # A partial set rolls back with the failed transaction. Keep only a
+            # safe state, never exception bodies or image/provider contents.
+            log.warning("Approved photo marking failed for %s",request_id)
+            with database() as db:
+                db.execute("UPDATE ih_publication_jobs SET state=?,updated=? WHERE request_id=? AND attempts=?",("pending" if attempts < 2 else "failed",time.time(),request_id,attempts))
+
+
+def seller_publication(db, row):
+    """Read-only public-export metadata, scoped to the opted-in camera link."""
+    listing = json.loads(row["listing"])
+    if listing.get("auto_publish") is not True:
+        return {}
+    result = {"auto_publish":True}
+    publication = db.execute("SELECT * FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
+    if publication and publication["revoked"]:
+        return {**result,"publication_status":"withdrawn"}
+    if listing.get("capture_mode") == "digital":
+        return {**result,"publication_status":"unavailable"}
+    if row["status"] != "confirmed" or row["analysis_status"] != "complete":
+        return {**result,"publication_status":"pending" if status(row) in {"waiting","capturing","processing"} else "unavailable"}
+    if publication:
+        photos = [dict(m) for m in db.execute("SELECT id,label,sha256 FROM ih_media WHERE request_id=? AND role='marked' ORDER BY rowid",(row["id"],))]
+        reference_count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]
+        if not photos or len(photos) != reference_count:
+            return {**result,"publication_status":"failed"}
+        return {**result,"publication_status":"ready","publication":{"id":publication["id"],"created":publication["created"],"photos":photos}}
+    job = db.execute("SELECT * FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
+    failed = job and (job["state"] == "failed" or job["updated"] <= time.time()-120)
+    return {**result,"publication_status":"failed" if failed else "pending"}
+
+
+def marked_zip(publication, images):
     output = io.BytesIO()
-    canvas.save(output, "JPEG", quality=92)
-    return output.getvalue()
+    with zipfile.ZipFile(output,"w",compression=zipfile.ZIP_STORED) as archive:
+        for i,m in enumerate(images):
+            archive.writestr(f"lockx-{publication['id']}-photo-{i+1}.jpg",m[0])
+    return Response(output.getvalue(),media_type="application/zip",headers={"Cache-Control":"private, no-store","Content-Disposition":f"attachment; filename=lockx-{publication['id']}-verified-photos.zip"})
 
 
 def create_router(authenticate):
@@ -1084,22 +1196,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = owned(db,request_id,owner)
-            if row["status"] != "confirmed" or row["analysis_status"] != "complete":
-                raise HTTPException(409,"Only a confirmed photo set can receive a public verification marking")
-            prior = db.execute("SELECT * FROM ih_publications WHERE request_id=?",(request_id,)).fetchone()
-            if prior:
-                if prior["revoked"]:
-                    raise HTTPException(409,"This record was withdrawn. Create a new inspection to publish again.")
-                return {"id":prior["id"]}
-            publication_id = secrets.token_hex(8)
-            refs = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(request_id,)).fetchall()
-            # Publish only marked listing photos; private video, claims, and capture links stay private.
-            capture_time = db.execute("SELECT finished FROM ih_sessions WHERE id=?",(row["session_id"],)).fetchone()[0]
-            for i,photo in enumerate(refs):
-                store_media(db,request_id,"marked","image/jpeg",marked_photo(photo[0],publication_id,capture_time),label=f"Verified photo {i+1}")
-            db.execute("INSERT INTO ih_publications VALUES (?,?,?,NULL)",(publication_id,request_id,time.time()))
-            event(db,request_id,"Owner published the approved photo set and its verification record")
-            return {"id":publication_id}
+            return {"id":publish_confirmed_photos(db,row)}
 
     @router.get("/requests/{request_id}/marked-photos")
     def marked_download(request_id: str, owner=Depends(access)):
@@ -1109,11 +1206,7 @@ def create_router(authenticate):
             if not publication or row["status"] != "confirmed":
                 raise HTTPException(409,"Publish an approved photo set before downloading its marking")
             images = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='marked' ORDER BY rowid",(request_id,)).fetchall()
-        output = io.BytesIO()
-        with zipfile.ZipFile(output,"w",compression=zipfile.ZIP_STORED) as archive:
-            for i,m in enumerate(images):
-                archive.writestr(f"lockx-{publication['id']}-photo-{i+1}.jpg",m[0])
-        return Response(output.getvalue(),media_type="application/zip",headers={"Cache-Control":"private, no-store","Content-Disposition":f"attachment; filename=lockx-{publication['id']}-verified-photos.zip"})
+        return marked_zip(publication,images)
 
     @router.delete("/requests/{request_id}/publication")
     def withdraw(request_id: str, owner=Depends(access)):
@@ -1169,7 +1262,10 @@ def create_router(authenticate):
             event(db, request_id, "Selected listing photos and description preserved")
             result = view(db,owned(db,request_id,owner),True)
             result["manage_key"] = management_key
-        background.add_task(prepare_scan,request_id)
+        # The fixed 10-second flow compares once after capture; its unused
+        # legacy guided-plan call would compete for model time and add cost.
+        if not listing.auto_publish:
+            background.add_task(prepare_scan,request_id)
         return result
 
     @router.get("/requests")
@@ -1232,7 +1328,20 @@ def create_router(authenticate):
                     "result":analysis.get("result") if analysis.get("result") in {"confirmed","mismatch","inconclusive"} else "inconclusive",
                     "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
                     **({"identifier_checks":identifiers} if identifiers else {}),
+                    **seller_publication(db,row),
                     "scope":SCOPE}
+
+    @router.get("/seller/{token}/marked-photos")
+    def seller_marked_download(token: str):
+        """Read-only approved exports, never a publication-management power."""
+        with database() as db:
+            row = seller(db,token)
+            available(row)
+            public = seller_publication(db,row)
+            if public.get("publication_status") != "ready":
+                raise HTTPException(409,"Verified QR photos are not available for this capture")
+            images = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='marked' ORDER BY rowid",(row["id"],)).fetchall()
+        return marked_zip(public["publication"],images)
 
     @router.post("/seller/{token}/scan/start")
     def scan_start(token: str):
