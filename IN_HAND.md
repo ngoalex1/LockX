@@ -1,4 +1,4 @@
-# In-hand confirmed
+# In-hand verification
 
 The third LockX service connects exact listing photos to a guided mobile camera capture. The seller opens the camera step in their browser, grants camera access, and records one 10-second video. No account, login, or native app is needed to create an inspection, complete capture, read results, publish an approved set, or download marked photos. The browser remembers an anonymous private access key. Each inspection also gets a separate private management link that works on another device. Keep that link: it controls access to the recording, results, and publication. Clearing browser storage removes the local list; the saved management link still works. A capture link cannot manage results or publish photos.
 
@@ -54,3 +54,7 @@ node --test test_in_hand_capture.cjs
 ```
 
 The In-hand tests cover legacy and automatic capture protocols, grouped reference coverage, local quality and motion gates, chunk ordering/idempotency/conflicts/limits, scoped asynchronous follow-ups, real assembled-video decoding, account and anonymous access boundaries, per-inspection management-key isolation, immutable reference access, stage ordering/time limits, session restart, quality warnings, interactive follow-up, real video decoding, replay rejection, conservative result rules, publication consent, actual QR decoding, ZIP downloads, and withdrawal. Browser QA covers photo selection, link creation, seller preflight, responsive layout, and an actual fixed 10-second MediaRecorder round trip with jitter/exposure fluctuations and camera frame callbacks disabled using a local synthetic camera stream. The local-only camera harness is never included in deployed assets. Physical iPhone/Android camera recording and model accuracy have not been established by these tests.
+
+## Public website
+
+The home page and landing page present only In-hand verification. The public shell uses a responsive system-font design with an illustrated photo/video/QR flow. Home, landing, and former dashboard links open this focused landing page. In-hand capture, private report, and public QR links retain their existing routes. Authentication and recovery data load only for explicit legacy workspace links, so public visitors do not pass through a recovery dashboard or account initialization. The selected-photo form, ten-second recording, AI comparison, automatic QR generation, and native image-save flow remain unchanged.

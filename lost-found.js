@@ -21,7 +21,8 @@
   const icon = name => `<svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.search}</svg>`;
   const state = {tab:'discover', reports:[], mine:[], matches:[], capabilities:null, category:'', query:'', loading:true, error:'', detail:null, recoveryAlerts:[], monitorHealth:null};
   const urls = new Map();
-  let lastFocus, activeLoad = 0, currentUser = null;
+  let lastFocus, activeLoad = 0, currentUser = null, routeLoad = 0;
+  const isLostFoundRoute = () => ['#lost-found', '#found'].includes(location.hash);
   function headers() { return typeof session !== 'undefined' && session ? {Authorization:'Bearer ' + session.access_token} : {}; }
   function signedIn() { return Boolean(headers().Authorization); }
   async function api(path, options = {}) {
@@ -299,7 +300,7 @@
     const match=event.target.closest('[data-lf-match]');if(match)review(match.dataset.lfMatch);
     const dismiss=event.target.closest('[data-lf-dismiss]');if(dismiss){dismiss.disabled=true;try{await api('/matches/'+encodeURIComponent(dismiss.dataset.lfDismiss),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'dismissed'})});closeModal();load();}catch(e){$('.lf-form-error',$('#lfModalBody')).textContent=e.message;dismiss.disabled=false;}}
     if(event.target.id==='lfModal')closeModal();
-    if(event.target.closest('[data-page="lost-found"]')){document.querySelector('.sidebar')?.classList.remove('open');location.hash='lost-found';load();}
+    if(event.target.closest('[data-page="lost-found"]')){document.querySelector('.sidebar')?.classList.remove('open');if(location.hash==='#lost-found')enterRoute();else location.hash='lost-found';}
   });
   document.addEventListener('keydown',event=>{
     if(!$('#lfModal').classList.contains('open'))return;
@@ -311,9 +312,29 @@
   });
   $('#lfSearch').oninput=event=>{state.query=event.target.value;render();};
   $('#lfCategory').onchange=event=>{state.category=event.target.value;render();};
-  window.addEventListener('lockx-session',()=>{if(state.tab!=='discover')state.tab='discover';load();});
-  window.addEventListener('hashchange',()=>{if(['#lost-found','#found'].includes(location.hash)){go('lost-found');if(location.hash==='#found')finderForm();}});
-  if(['#lost-found','#found'].includes(location.hash)||window.LOCKX_LOCAL_PREVIEW)go('lost-found');
-  load().then(async()=>{const id=new URLSearchParams(location.search).get('item');if(id&&location.protocol!=='file:'){if(![...state.mine,...state.reports].some(r=>r.id===id)){try{state.reports.push(await api('/public/reports/'+encodeURIComponent(id)));}catch{toast('Listing unavailable','This report may be private, archived, or already recovered.');return;}}detail(id);}if(location.hash==='#found'&&location.protocol!=='file:')finderForm();});
+  window.addEventListener('lockx-session',()=>{if(!isLostFoundRoute())return;if(state.tab!=='discover')state.tab='discover';load();});
+  async function enterRoute(){
+    if(!isLostFoundRoute())return;
+    const route=++routeLoad, openingHash=location.hash;
+    go('lost-found');
+    await load();
+    if(route!==routeLoad||location.hash!==openingHash)return;
+    const id=new URLSearchParams(location.search).get('item');
+    if(id&&location.protocol!=='file:'){
+      if(![...state.mine,...state.reports].some(r=>r.id===id)){
+        try{
+          const report=await api('/public/reports/'+encodeURIComponent(id));
+          if(route!==routeLoad||location.hash!==openingHash)return;
+          state.reports.push(report);
+        }catch{if(route===routeLoad&&location.hash===openingHash)toast('Listing unavailable','This report may be private, archived, or already recovered.');return;}
+      }
+      detail(id);
+    }
+    if(openingHash==='#found'&&location.protocol!=='file:')finderForm();
+  }
+  window.addEventListener('hashchange',()=>{if(isLostFoundRoute())enterRoute();else routeLoad++;});
+  // Existing item links remain reachable, without loading recovery on verification pages.
+  if(!isLostFoundRoute()&&!location.hash.startsWith('#in-hand')&&new URLSearchParams(location.search).get('item'))history.replaceState(null,'','#lost-found');
+  if(isLostFoundRoute())enterRoute();
   setInterval(()=>{if(document.visibilityState==='visible'&&location.hash==='#lost-found'&&signedIn()&&!state.loading&&!$('#lfModal').classList.contains('open'))load();},60000);
 })();
