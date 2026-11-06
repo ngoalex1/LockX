@@ -102,7 +102,7 @@ def test_opted_in_four_photo_match_automatically_returns_real_qr_photos_and_zip(
 
 
 @pytest.mark.parametrize("case", ["different_photo", "unclear_photo", "missing_photo", "partial_capture", "digital"])
-def test_automatic_marking_never_relaxes_the_complete_physical_item_match(setup, case):
+def test_original_all_photos_consent_never_silently_publishes_a_partial_set(setup, case):
     client, _, _, _ = setup
     visual = assessment()
     if case == "different_photo":

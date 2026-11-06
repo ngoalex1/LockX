@@ -31,8 +31,11 @@ def test_phone_result_is_read_only_scoped_and_has_a_finding_for_every_photo(setu
     response = result(client, record)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == {"id", "status", "analysis_status", "summary", "result", "photos", "scope"}
+    assert set(body) == {"id", "status", "analysis_status", "summary", "result", "photos", "scope",
+                         "eligible_photo_indices", "verified_count", "total_count", "partial"}
     assert body["id"] == record["id"] and body["status"] == "waiting"
+    assert body["eligible_photo_indices"] == [] and body["verified_count"] == 0
+    assert body["total_count"] == 4 and body["partial"] is False
     assert [photo["photo_index"] for photo in body["photos"]] == list(range(4))
     assert all(photo["finding"] == "not_established" for photo in body["photos"])
     assert all(set(photo) == {"photo_index", "finding", "evidence"} for photo in body["photos"])

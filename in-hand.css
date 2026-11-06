@@ -399,3 +399,39 @@ body.ih-scanning,
 @media (prefers-reduced-motion: reduce) {
   .ih-button { transition: none; }
 }
+
+/* Per-photo decisions remain visible when only part of a set passes. */
+.ih-result-gallery { align-items: start; }
+.ih-photo-result-image { position: relative; }
+.ih-photo-result .ih-photo-result-image > img,
+.ih-photo-result .ih-photo-result-image > a > img { display: block; width: 100%; }
+.ih-photo-result-image > .ih-photo-status {
+  position: absolute; top: 10px; right: 10px; width: 34px; height: 34px;
+  display: grid !important; place-items: center; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 2px 8px #00000024;
+  color: #fff; font: 700 23px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.ih-photo-status > span { display: block; color: inherit; }
+.ih-photo-status--passed { background: #248a3d; }
+.ih-photo-status--failed { background: #d52c2c; }
+.ih-photo-status--unclear { background: #a86800; }
+.ih-photo-status--pending { background: #6e6e73; }
+.ih-result-gallery .ih-photo-result--passed,
+.ih-evidence-grid .ih-photo-result--passed { border-color: #83bf91; }
+.ih-result-gallery .ih-photo-result--failed,
+.ih-evidence-grid .ih-photo-result--failed { border-color: #e8a4a0; }
+.ih-result-gallery .ih-photo-result--unclear,
+.ih-evidence-grid .ih-photo-result--unclear { border-color: #d7bc87; }
+.ih-photo-result figcaption > span { display: block; font-size: 12px; line-height: 1.5; color: #6e6e73; margin-bottom: 10px; }
+.ih-photo-result--passed figcaption > strong { color: #206b33; }
+.ih-photo-result--failed figcaption > strong { color: #b92323; }
+.ih-photo-result--unclear figcaption > strong { color: #8a5700; }
+.ih-photo-unverified-note { display: block; color: #6e6e73; font-size: 11px; line-height: 1.4; }
+.ih-result-gallery .ih-photo-result-image > img { height: 210px; object-fit: contain; background: #f5f5f7; }
+.ih-phone-photo-results .ih-photo-result-image > img { height: 176px; }
+.ih-photo-result figcaption > .ih-button { margin-top: 10px; }
+@media (max-width: 720px) {
+  .ih-result-gallery .ih-photo-result-image > img { height: 170px; }
+  .ih-photo-result-image > .ih-photo-status { width: 30px; height: 30px; top: 8px; right: 8px; font-size: 21px; }
+  .ih-photo-result figcaption > span { font-size: 11px; }
+}
