@@ -11,6 +11,7 @@
   let photos = [], capabilities = null, routeNumber = 0, poll = null, reportURLs = [], capture = null, sellerData = null, sellerToken = null, isStandalone = false;
   let managementKey = '', reportRenderNumber = 0;
   const reportMedia = new Map();
+  let markedFiles=null;
   const secretPattern = /^[A-Za-z0-9_-]{43}$/;
   let browserAccess;
   try { browserAccess = JSON.parse(localStorage.getItem('lockx-in-hand-access') || 'null'); } catch {}
@@ -56,7 +57,7 @@
   function appLink(path) { return location.origin + location.pathname + '#in-hand/' + path; }
   function reportPath(record){const key=managementKey||browserAccess.records[record.id];return 'report/'+record.id+(secretPattern.test(key||'')?'/'+key:'');}
   function managementBox(record){const key=managementKey||browserAccess.records[record.id];if(!secretPattern.test(key||''))return '';const link=appLink(reportPath(record));return `<div class="ih-link-box"><label>Private management link<input readonly value="${esc(link)}" aria-label="Private management link"></label><button type="button" class="ih-button secondary" data-copy="${esc(link)}">Copy private results link</button><p style="font-size:11px;color:#819073;margin-bottom:0">Keep this link to view your results, download approved photos, and control publication without an account. Anyone with it can manage this photo set. Keep it private.</p></div>`;}
-  function revokeReports() { reportURLs.forEach(URL.revokeObjectURL); reportURLs = []; reportMedia.clear(); }
+  function revokeReports() { reportURLs.forEach(URL.revokeObjectURL); reportURLs = []; reportMedia.clear();clearMarkedFiles(); }
   async function privateURL(id) {
     if(reportMedia.has(id))return reportMedia.get(id);
     const route=routeNumber,pending=(async()=>{const blob=await(await api('/media/'+id,{},true)).blob();if(route!==routeNumber)throw Error('Inspection changed.');const url=URL.createObjectURL(blob);reportURLs.push(url);return url;})();
@@ -184,23 +185,72 @@
       }
     } catch (error) { if (route===routeNumber&&render===reportRenderNumber) page.innerHTML = `<a class="ih-button text" href="#in-hand">← All inspections</a>${notice(error.message,'error')}`; }
   }
-  function verifiedPhotoSet(publication,zipPath,privateAccess=false) {
+  function verifiedPhotoSet(publication) {
     const link=appLink('verify/'+publication.id);
-    return `<section class="ih-verified-set" aria-label="Your QR-marked verified photos"><div class="ih-verified-actions"><button type="button" class="ih-button ih-wide" data-marked-zip="${esc(zipPath)}" data-private-download="${privateAccess?'true':'false'}" data-download-name="lockx-${esc(publication.id)}-verified-photos.zip">Save all verified photos ↓</button><button type="button" class="ih-button secondary ih-wide" data-copy="${esc(link)}">Copy verification link</button></div><div id="ihMarkedError" class="ih-note error" role="alert" hidden></div><div class="ih-marked-gallery">${(publication.photos||[]).map((photo,i)=>`<figure><img src="${base}/public/${encodeURIComponent(publication.id)}/photos/${encodeURIComponent(photo.id)}" alt="Verified photo ${i+1} with LockX marking and QR code"><figcaption><strong>Photo ${i+1} · Verified</strong><button type="button" class="ih-button secondary" data-marked-photo="/public/${encodeURIComponent(publication.id)}/photos/${encodeURIComponent(photo.id)}" data-download-name="lockx-${esc(publication.id)}-photo-${i+1}.jpg">Save photo ${i+1} ↓</button></figcaption></figure>`).join('')}</div><a class="ih-button text" href="#in-hand/verify/${esc(publication.id)}">View public verification record ↗</a></section>`;
+    return `<section class="ih-verified-set" data-marked-publication="${esc(publication.id)}" aria-label="Your QR-marked verified photos"><div class="ih-verified-actions"><button type="button" class="ih-button ih-wide" data-save-all-photos disabled>Save all to Photos</button><button type="button" class="ih-button secondary ih-wide" data-copy="${esc(link)}">Copy verification link</button></div><p class="ih-save-photos-hint" data-save-photos-hint aria-live="polite">Preparing your verified JPEG images…</p><div id="ihMarkedError" class="ih-note error" role="alert" hidden></div><button type="button" class="ih-button secondary" data-marked-retry hidden>Prepare photos again</button><div class="ih-marked-gallery">${(publication.photos||[]).map((photo,i)=>`<figure><img src="${base}/public/${encodeURIComponent(publication.id)}/photos/${encodeURIComponent(photo.id)}" alt="Verified photo ${i+1} with LockX marking and QR code"><figcaption><strong>Photo ${i+1} · Verified</strong><button type="button" class="ih-button secondary" data-save-marked-photo="/public/${encodeURIComponent(publication.id)}/photos/${encodeURIComponent(photo.id)}" data-photo-index="${i}" data-download-name="lockx-${esc(publication.id)}-photo-${i+1}.jpg" disabled>Save photo ${i+1}</button></figcaption></figure>`).join('')}</div><a class="ih-button text" href="#in-hand/verify/${esc(publication.id)}">View public verification record ↗</a></section>`;
   }
+  function clearMarkedFiles(){if(markedFiles){markedFiles.controller.abort();markedFiles.files=[];markedFiles.entries=[];markedFiles.listener=null;markedFiles=null;}}
+  function canSharePhotos(files){try{return !!files.length&&typeof navigator.share==='function'&&typeof navigator.canShare==='function'&&navigator.canShare({files});}catch{return false;}}
   function bindMarkedDownloads(element) {
-    element.querySelectorAll('[data-marked-photo],[data-marked-zip]').forEach(button=>button.onclick=async()=>{
-      const old=button.textContent;button.disabled=true;button.textContent='Preparing download…';
-      const errorBox=$('#ihMarkedError',element);if(errorBox)errorBox.hidden=true;
-      try{const path=button.dataset.markedPhoto||button.dataset.markedZip;download(await(await api(path,{},button.dataset.privateDownload==='true')).blob(),button.dataset.downloadName);}
-      catch(error){if(errorBox){errorBox.hidden=false;errorBox.textContent=error.message||'The images could not be downloaded. Please try again.';}}
-      finally{button.disabled=false;button.textContent=old;}
+    const section=$('[data-marked-publication]',element);
+    if(!section){clearMarkedFiles();return;}
+    const buttons=$$('[data-save-marked-photo]',section),publication=section.dataset.markedPublication;
+    const key=routeNumber+':'+publication+':'+buttons.map(button=>button.dataset.saveMarkedPhoto).join(',');
+    if(markedFiles?.key!==key){
+      clearMarkedFiles();
+      const state={key,publication,route:routeNumber,controller:new AbortController(),entries:buttons.map(()=>({file:null,error:null})),files:[],pending:true,listener:null};markedFiles=state;
+      // Prepare actual JPEG Files before a tap: Safari requires the native share call
+      // itself to run synchronously within that tap's transient user activation.
+      const timeout=setTimeout(()=>state.controller.abort(),20000);
+      Promise.allSettled(buttons.map(async(button,index)=>{
+        try{
+          const blob=await(await api(button.dataset.saveMarkedPhoto,{signal:state.controller.signal})).blob();
+          if(markedFiles!==state||state.route!==routeNumber||state.controller.signal.aborted)return;
+          if(!blob.size||!/^image\/jpeg(?:;|$)/i.test(blob.type))throw Error('A verified photo could not be prepared.');
+          state.entries[index].file=new File([blob],button.dataset.downloadName,{type:'image/jpeg'});
+        }catch(error){if(markedFiles===state&&state.entries[index])state.entries[index].error=error;}
+        if(markedFiles===state)state.listener?.();
+      })).then(()=>{
+        clearTimeout(timeout);if(markedFiles!==state)return;
+        state.pending=false;state.files=state.entries.map(entry=>entry.file).filter(Boolean);state.listener?.();
+      });
+    }
+    const state=markedFiles,allButton=$('[data-save-all-photos]',section),hint=$('[data-save-photos-hint]',section),errorBox=$('#ihMarkedError',section),retry=$('[data-marked-retry]',section);
+    const current=()=>markedFiles===state&&state.route===routeNumber&&section.isConnected;
+    function message(text,error=false){if(!current())return;if(error){errorBox.textContent=text;errorBox.hidden=false;}else{hint.textContent=text;errorBox.hidden=true;}}
+    function update(){
+      if(!current())return;
+      const loaded=state.entries.filter(entry=>entry.file).length,failed=state.entries.some(entry=>entry.error);
+      const complete=!state.pending&&loaded===buttons.length&&buttons.length>0,multiple=complete&&canSharePhotos(state.files),single=state.entries.some(entry=>entry.file&&canSharePhotos([entry.file]));
+      allButton.disabled=!multiple;allButton.hidden=!state.pending&&!multiple;
+      retry.hidden=state.pending||!failed;
+      buttons.forEach((button,index)=>{const file=state.entries[index]?.file;button.disabled=!file;button.textContent=(file&&canSharePhotos([file])?'Save photo ':'Download JPEG ')+(index+1);});
+      hint.textContent=state.pending?'Preparing your verified JPEG images…':multiple?'Select Save Images (iPhone), or a Photos/Gallery save option if available.':failed?'Some images could not be prepared. Try again, or press and hold each photo to use your phone’s save option.':single?'This browser shares one photo at a time. Use Save photo below, then choose your phone’s save option.':'This browser saves individual JPEGs to Downloads. To save to Photos, press and hold each image and choose its save option.';
+    }
+    state.listener=update;update();
+    async function shareFiles(files,button){
+      if(!current()||!canSharePhotos(files))return;
+      const old=button.textContent;button.disabled=true;
+      try{
+        // No fetch or await before share; pass only image Files so iOS offers Save Images.
+        const sharing=navigator.share({files});
+        await sharing;
+        message('Share menu closed. Photos are saved only if you chose its save option.');
+      }catch(error){if(error.name!=='AbortError')message('The share menu could not save these photos. Press and hold an image to use your phone’s save option.',true);}
+      finally{if(current()){button.disabled=false;button.textContent=old;}}
+    }
+    allButton.onclick=()=>{if(current()&&!state.pending&&state.files.length===buttons.length)shareFiles(state.files,allButton);};
+    buttons.forEach((button,index)=>button.onclick=()=>{
+      const file=state.entries[index]?.file;if(!current()||!file)return;
+      if(canSharePhotos([file]))shareFiles([file],button);
+      else{download(file,file.name);message('JPEG downloaded. This browser saves downloads separately from Photos. You can also press and hold the image to use your phone’s save option.');}
     });
+    retry.onclick=()=>{clearMarkedFiles();bindMarkedDownloads(element);};
   }
   function publicationBox(r) {
     const p = r.publication;
     if (p?.revoked) return '<div class="ih-card" style="margin-top:25px"><h2>Public record withdrawn.</h2><p>The QR link now shows that this record was withdrawn. A new capture is needed to publish another set.</p></div>';
-    if (p) return `<div class="ih-card ih-ready-card"><span class="ih-kicker">Ready to use in your listing</span><h2>Your verified photos are ready.</h2>${verifiedPhotoSet({...p,photos:r.media.filter(m=>m.role==='marked')},'/requests/'+r.id+'/marked-photos',true)}<details class="ih-result-details"><summary>Publication controls</summary><button class="ih-button text" id="ihWithdraw">Withdraw public record</button></details></div>`;
+    if (p) return `<div class="ih-card ih-ready-card"><span class="ih-kicker">Ready to use in your listing</span><h2>Your verified photos are ready.</h2>${verifiedPhotoSet({...p,photos:r.media.filter(m=>m.role==='marked')})}<details class="ih-result-details"><summary>Publication controls</summary><button class="ih-button text" id="ihWithdraw">Withdraw public record</button></details></div>`;
     if(r.auto_publish)return `<div class="ih-card ih-ready-card"><h2>Your photos matched.</h2>${notice(r.publication_status==='failed'?'The QR images could not be prepared. Your comparison and recording are saved.':'Preparing the QR-marked photos automatically. This page updates when they are ready.')}</div>`;
     return `<form id="ihPublishForm" class="ih-card" style="margin-top:25px"><span class="ih-kicker">Ready to share</span><h2>Make these photos verifiable.</h2><p>Publish this approved photo set and download copies marked “LockX In-hand verified,” with a QR link to its record.</p><label class="ih-check"><input type="checkbox" required><span>I want these selected photos and the item title to be publicly visible. I have checked for faces, addresses, usable ticket barcodes, and other private information.</span></label><button class="ih-button">Publish verified photo set →</button></form>`;
   }
@@ -244,7 +294,7 @@
       const knownKey=browserAccess.records[result.id],ownerLink=secretPattern.test(knownKey||'')?appLink('report/'+result.id+'/'+knownKey):'';
       const comparison=`<div class="ih-phone-photo-results">${(sellerData?.media||[]).map((photo,i)=>{const finding=findings.get(i);return `<figure><img src="${base}/seller/${encodeURIComponent(token)}/photos/${photo.id}" alt="Selected photo ${i+1}"><figcaption><strong>Photo ${i+1} · ${result.status==='processing'?'Comparing…':esc({supported:'Match supported',contradicted:'Mismatch',not_established:'Not established'}[finding?.finding]||'Not established')}</strong><span>${result.status==='processing'?'Checking against frames from your recording.':esc(finding?.evidence||'The recording did not establish this photo match.')}</span></figcaption></figure>`;}).join('')}</div>${numberChecks}${ownerLink?`<a class="ih-button text" href="${esc(ownerLink)}">Private evidence & record controls →</a>`:''}`;
       const publicationNote=result.publication_status==='withdrawn'?notice('The public verification record was withdrawn. Its photos no longer carry an active verification record.','warning'):result.publication_status==='failed'?notice('Your photo match is confirmed, but the QR images could not be prepared. Your recording is saved.','warning'):'';
-      shell(`<div class="ih-standalone-content ih-phone-results"><span class="ih-kicker">${ready?'✓ All photos matched':`Camera off · ${waitingForMarks?'Preparing verified photos':pending?'AI comparison in progress':'Photo-by-photo result'}`}</span><h1>${esc(title)}</h1><p>${ready?'Your QR-marked images are ready to save and use in your listing. Each QR code opens this photo set’s LockX verification record.':esc(result.summary)}</p>${pending?notice(Date.now()-started>90000?'This is taking longer than usual. Your camera is off and the recording is saved. This page will update automatically.':waitingForMarks?'Every photo matched. Adding its verified marking and QR code now…':result.auto_publish?'LockX is checking every photo against the recording. Your verified images will appear here automatically if they all match.':'LockX is checking every photo against the recording. This page updates automatically.'):''}${publicationNote}${ready?verifiedPhotoSet(result.publication,'/seller/'+encodeURIComponent(token)+'/marked-photos')+`<details class="ih-result-details"><summary>Comparison details</summary>${comparison}</details>`:comparison}${result.publication_status==='failed'&&ownerLink?`<p><a class="ih-button secondary ih-wide" href="${esc(ownerLink)}">Open saved record</a></p>`:''}<p class="ih-note">${esc(result.scope||scope)}</p></div>`);
+      shell(`<div class="ih-standalone-content ih-phone-results"><span class="ih-kicker">${ready?'✓ All photos matched':`Camera off · ${waitingForMarks?'Preparing verified photos':pending?'AI comparison in progress':'Photo-by-photo result'}`}</span><h1>${esc(title)}</h1><p>${ready?'Your QR-marked images are ready to save and use in your listing. Each QR code opens this photo set’s LockX verification record.':esc(result.summary)}</p>${pending?notice(Date.now()-started>90000?'This is taking longer than usual. Your camera is off and the recording is saved. This page will update automatically.':waitingForMarks?'Every photo matched. Adding its verified marking and QR code now…':result.auto_publish?'LockX is checking every photo against the recording. Your verified images will appear here automatically if they all match.':'LockX is checking every photo against the recording. This page updates automatically.'):''}${publicationNote}${ready?verifiedPhotoSet(result.publication)+`<details class="ih-result-details"><summary>Comparison details</summary>${comparison}</details>`:comparison}${result.publication_status==='failed'&&ownerLink?`<p><a class="ih-button secondary ih-wide" href="${esc(ownerLink)}">Open saved record</a></p>`:''}<p class="ih-note">${esc(result.scope||scope)}</p></div>`);
       bindLinkButtons(standalone);bindMarkedDownloads(standalone);
       if(pending)poll=setTimeout(()=>showSellerResult(token,route,started),Date.now()-started>30000?5000:1500);
     }catch(error){
