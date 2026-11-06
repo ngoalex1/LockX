@@ -1014,8 +1014,8 @@ def create_router(authenticate):
             listing = Listing.model_validate_json(row["listing"])
             count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]
             movements = {
-                "handheld":["Slowly turn the same item from its front to its back, keeping it in view.",
-                            "Slowly turn the same item from its back to its front, keeping it in view."],
+                "handheld":["Slowly turn the same item all the way around to the left, showing its front, both sides, and back. Keep it in view.",
+                            "Slowly turn the same item all the way around to the right, showing its front, both sides, and back. Keep it in view."],
                 "flat":["Show the front, slowly flip the same item over, then show its back.",
                         "Show the back, slowly flip the same item over, then show its front."],
                 "stationary":["Slowly move your phone from the front toward the left side of the same item. Do not move a heavy item.",
