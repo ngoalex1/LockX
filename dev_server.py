@@ -37,7 +37,7 @@ def index():
 
 @app.get("/{asset}")
 def asset(asset: str):
-    if asset not in {"app.js", "styles.css", "lost-found.js", "lost-found.css", "landing.css", "landing-asset.css", "lockx-city-watch-hero.png", "in-hand.js", "in-hand.css"}:
+    if asset not in {"app.js", "styles.css", "lost-found.js", "lost-found.css", "landing.css", "landing-asset.css", "lockx-city-watch-hero.png", "in-hand.js", "in-hand.css", "in-hand-capture.js"}:
         from fastapi import HTTPException
         raise HTTPException(404)
     return FileResponse(ROOT / asset,headers={"Cache-Control":"no-store"})

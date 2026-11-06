@@ -526,3 +526,18 @@ def test_confirmed_no_login_scan_keeps_management_and_publication_separate(setup
     public = client.get(BASE + "/public/" + response.json()["id"]).json()
     assert public["photo_count"] == 4
     assert not {"token", "session_id", "manage_key", "analysis", "media"} & public.keys()
+
+
+def test_creation_uses_one_grouped_planning_call(setup):
+    client, _, _, monkeypatch = setup
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-placeholder')
+    monkeypatch.setenv('LOCKX_IN_HAND_VISION_MODEL', 'test-model')
+    calls = []
+    def plan_once(schema, *args, **kwargs):
+        calls.append(schema)
+        return ih.ScanPlan(groups=[ih.ScanGroup(photo_indices=[i], label=f'View {i}', instruction='Show its identifying detail clearly.') for i in range(4)])
+    monkeypatch.setattr(ih, 'vision_call', plan_once)
+    record = create(client).json()
+    assert calls == [ih.ScanPlan]
+    stage = scan_start(client, record)
+    assert sorted(i for step in stage['stages'] for i in step['photo_indices']) == list(range(4))

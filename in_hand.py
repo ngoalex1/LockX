@@ -891,7 +891,6 @@ def create_router(authenticate):
             result = view(db,owned(db,request_id,owner),True)
             result["manage_key"] = management_key
         background.add_task(prepare_scan,request_id)
-        background.add_task(prepare,request_id)
         return result
 
     @router.get("/requests")
