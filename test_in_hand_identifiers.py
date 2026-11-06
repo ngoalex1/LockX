@@ -241,6 +241,7 @@ def test_phone_identifier_finding_agrees_with_deterministic_number_comparison(se
     phone = client.get(BASE+f"/seller/{record['token']}/result").json()
     assert phone["status"] == expected_status
     assert phone["identifier_checks"][0]["finding"] == expected_finding
+    assert phone["photos"][0]["finding"] == expected_finding
 
 
 def test_digital_results_do_not_echo_usable_ticket_identifiers(setup):
@@ -259,3 +260,55 @@ def test_digital_results_do_not_echo_usable_ticket_identifiers(setup):
     response = client.get(BASE+f"/seller/{record['token']}/result")
     assert response.status_code == 200 and barcode not in response.text
     assert record["manage_key"] not in response.text
+
+
+def test_actual_provider_payload_constrains_original_citations_and_four_photo_findings(setup):
+    client,_,_,monkeypatch = setup
+    record,_,_,_ = seed_pending(setup)
+    captured = {}
+    def fake_post(url,**kwargs):
+        assert url == "https://api.openai.com/v1/responses"
+        payload = kwargs["json"]
+        captured["schema"] = payload["text"]["format"]["schema"]
+        captured["strict"] = payload["text"]["format"]["strict"]
+        selected = selected_labels(payload["input"][0]["content"])
+        captured["indices"] = selected
+        photos = [{"photo_index":index,"finding":"supported","evidence":"Corresponding distinctive marks.",
+                   "frame_indices":[selected[-1]]} for index in range(4)]
+        visual = assessment(photos=photos,identifier_checks=[identifier(frame_indices=[selected[-1]])])
+        class Response:
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return {"output":[{"content":[{"type":"output_text","text":visual.model_dump_json()}]}]}
+        return Response()
+    monkeypatch.setenv("OPENAI_API_KEY","test-placeholder")
+    monkeypatch.setenv("LOCKX_IN_HAND_VISION_MODEL","test-model")
+    monkeypatch.setattr(ih.httpx,"post",fake_post)
+    ih.analyze(record["id"])
+    final = private_detail(client,record)
+    assert final["status"] == "confirmed", final["analysis"]
+    schema,selected = captured["schema"],captured["indices"]
+    assert captured["strict"] is True
+    assert len(selected) <= 12 and max(selected) >= 18
+    assert set(selected) != set(range(len(selected)))
+    assert schema["properties"]["photos"]["minItems"] == 4
+    assert schema["properties"]["photos"]["maxItems"] == 4
+    for name in ("PhotoFinding","Finding","IdentifierCheck"):
+        properties = schema["$defs"][name]["properties"]
+        assert properties["frame_indices"]["items"]["enum"] == selected
+    for name in ("PhotoFinding","IdentifierCheck"):
+        assert schema["$defs"][name]["properties"]["photo_index"]["enum"] == [0,1,2,3]
+    def verify_required(node):
+        if isinstance(node,dict):
+            if node.get("type") == "object" and "properties" in node:
+                assert set(node["required"]) == set(node["properties"])
+                assert node["additionalProperties"] is False
+            assert "default" not in node
+            for value in node.values():
+                verify_required(value)
+        elif isinstance(node,list):
+            for value in node:
+                verify_required(value)
+    verify_required(schema)
+    assert final["analysis"]["visual"]["photos"][0]["frame_indices"] == [selected[-1]]

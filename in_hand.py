@@ -448,7 +448,7 @@ def review_scan(session_id):
             db.execute("UPDATE ih_scan_sessions SET review_status='unavailable' WHERE session_id=?", (session_id,))
 
 
-def strict_vision_schema(schema):
+def strict_vision_schema(schema, allowed_frame_indices=None, photo_count=None):
     """Keep Python defaults backwards compatible while satisfying strict JSON output."""
     result = schema.model_json_schema()
 
@@ -465,14 +465,31 @@ def strict_vision_schema(schema):
                 required_properties(value)
 
     required_properties(result)
+    if schema is VisualAssessment:
+        if allowed_frame_indices is not None:
+            allowed = sorted(set(allowed_frame_indices))
+            if not allowed or any(type(index) is not int or index < 0 for index in allowed):
+                raise ValueError("Invalid comparison frame selection")
+            for definition in result.get("$defs", {}).values():
+                indices = definition.get("properties", {}).get("frame_indices")
+                if indices is not None:
+                    indices["items"]["enum"] = allowed
+        if photo_count is not None:
+            if type(photo_count) is not int or not 1 <= photo_count <= MAX_PHOTOS:
+                raise ValueError("Invalid comparison reference count")
+            for definition in result.get("$defs", {}).values():
+                index = definition.get("properties", {}).get("photo_index")
+                if index is not None:
+                    index["enum"] = list(range(photo_count))
+            result["properties"]["photos"].update(minItems=photo_count, maxItems=photo_count)
     return result
 
 
-def vision_call(schema, instructions, content, timeout=100):
+def vision_call(schema, instructions, content, timeout=100, allowed_frame_indices=None, photo_count=None):
     key, model = os.getenv("OPENAI_API_KEY"), vision_model()
     response = httpx.post("https://api.openai.com/v1/responses", headers={"Authorization":"Bearer " + key},
         json={"model":model,"store":False,"instructions":instructions,"input":[{"role":"user","content":content}],
-              "text":{"format":{"type":"json_schema","name":"in_hand_assessment","strict":True,"schema":strict_vision_schema(schema)}},
+              "text":{"format":{"type":"json_schema","name":"in_hand_assessment","strict":True,"schema":strict_vision_schema(schema,allowed_frame_indices,photo_count)}},
               "max_output_tokens":5000}, timeout=timeout)
     response.raise_for_status()
     output = "".join(c.get("text", "") for item in response.json().get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
@@ -903,6 +920,9 @@ def analyze(request_id):
     if not changed or not row:
         return
     analysis = json.loads(row["analysis"] or "{}")
+    analysis.pop("failure_reason", None)
+    if isinstance(analysis.get("video"), dict):
+        analysis["video"].pop("vision_ms", None)
     if not visual_ready():
         analysis.update(summary="Your recording is ready to review. Automated photo comparison is unavailable; an individual-item match has not been established.", result="inconclusive")
         with database() as db:
@@ -932,14 +952,16 @@ def analyze(request_id):
             "Brand, model/SKU, batch and date identify a class, not an individual. same_item=supported needs at least two specific individual correspondences "
             "such as unique wear, an individual serial plus a separate mark, each established in video. Same-model appearance alone is insufficient. "
             "Check requested movements and consistency across the supplied timeline frames. Cite ORIGINAL video_frame indices in their labels; "
-            "indices may have gaps and must not be renumbered. Feature rankings are sampling hints, never verification evidence. "
+            "indices may have gaps and must not be renumbered. Prefer only the 1-3 clearest supporting frames per finding; add more only when necessary. "
+            "Feature rankings are sampling hints, never verification evidence. "
             "Enumerate every material listing assertion in claims; anything not visually provable is not_established. "
             "Be concise: photo/claim evidence at most 20 words, identifier evidence at most 12 words, each distinctive detail at most 15 words, summary at most 35 words. "
             "Never transcribe barcodes, QR payloads, access/redemption codes, passwords or other credentials. For digital/ticket listings return identifier_checks=[]; "
             "a displayed ticket screen is expected and cannot establish validity or transfer rights. "
             "No authenticity, ownership, internal-function, current-possession or delivery certification. "
             "Briefly state in summary that sampled browser video cannot attest live/uncut capture or resistance to injection/deepfakes. "
-            "Only evidence-specific problems belong in concerns. Insufficient evidence is inconclusive.", content)
+            "Only evidence-specific problems belong in concerns. Insufficient evidence is inconclusive.", content,
+            allowed_frame_indices=selected, photo_count=len(refs))
         analysis["video"]["vision_ms"] = round((perf_counter()-comparison_started)*1000, 2)
         if {p.photo_index for p in visual.photos} != set(range(len(refs))) or len(visual.photos) != len(refs):
             raise ValueError("Missing reference findings")
@@ -971,8 +993,18 @@ def analyze(request_id):
         with database() as db:
             db.execute("UPDATE ih_requests SET status=?,analysis_status='complete',analysis=? WHERE id=?", (result,json.dumps(analysis),request_id))
             event(db, request_id, "Selected photos and written claims compared with server-extracted video frames")
-    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError):
+    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
         log.warning("Visual comparison failed for %s", request_id)
+        # Diagnostics remain in the capability-protected management response;
+        # never persist a provider body, user images, keys or raw model output.
+        analysis["failure_reason"] = {
+            "Missing reference findings":"missing_reference_findings",
+            "Invalid frame reference":"invalid_frame_reference",
+            "Invalid identifier reference photo":"invalid_identifier_reference_photo",
+            "Missing extracted comparison evidence":"missing_extracted_evidence",
+            "Invalid comparison frame selection":"invalid_frame_selection",
+            "Invalid comparison reference count":"invalid_reference_count",
+        }.get(str(exc), "provider_http_error" if isinstance(exc,httpx.HTTPError) else "invalid_visual_response")
         analysis.update(result="inconclusive",summary="The recording is preserved, but the automated comparison could not be completed.")
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?", (json.dumps(analysis),request_id))
