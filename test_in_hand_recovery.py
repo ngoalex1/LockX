@@ -316,7 +316,10 @@ def test_fixed_video_quality_notes_from_actual_decoded_frames_prevent_confirmati
     writer.release()
     clock[0] += 10.1
     assert chunk(client, record, stage, 0, path.read_bytes()).status_code == 200
-    model_ready(monkeypatch, assessment())
+    supported = assessment()
+    for photo in supported.photos:
+        photo.frame_indices = [0]  # A real selected anchor; this test isolates the quality gate.
+    model_ready(monkeypatch, supported)
     assert finish(client, record, stage, recording_seconds=10).status_code == 202
     final = detail(client, record)
     assert final["analysis_status"] == "complete" and final["status"] == "inconclusive"
