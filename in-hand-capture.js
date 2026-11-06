@@ -58,5 +58,48 @@
       }
     });
   }
-  return Object.freeze({measureFrame,inspectFrame,stopRecorder});
+  function createLightCycle(track,{onState=()=>{},setTimer=setTimeout,clearTimer=clearTimeout}={}){
+    // Optional capture aid only: a resolved constraint is not proof of live
+    // capture or of the physical light state. Never gate or extend recording.
+    let supported=false;
+    try{
+      const torch=track?.getCapabilities?.().torch;
+      supported=typeof track?.applyConstraints==='function'&&(torch===true||Array.isArray(torch)&&torch.includes(true)&&torch.includes(false));
+    }catch{}
+    let started=false,ended=false,disabled=false,phase='off',timer=null,lastState=null;
+    function notify(state){if(lastState===state)return;lastState=state;try{onState(state);}catch{}}
+    function usable(){return track&&track.readyState!=='ended';}
+    function turnOff(){
+      if(!supported||!usable())return;
+      try{Promise.resolve(track.applyConstraints({advanced:[{torch:false}]})).catch(()=>{});}catch{}
+    }
+    function finish(){
+      if(ended)return;ended=true;phase='off';clearTimer(timer);timer=null;turnOff();
+      if(supported&&!disabled)notify('off');
+    }
+    function disable(){
+      if(ended||disabled)return;disabled=true;phase='off';clearTimer(timer);timer=null;turnOff();notify(supported?'disabled':'unsupported');
+    }
+    function start(){
+      if(started||ended||disabled)return;started=true;
+      if(!supported||!usable()){notify('unsupported');return;}
+      phase='on';
+      // This timer is anchored to start(), not to the asynchronous driver call.
+      timer=setTimer(()=>{timer=null;if(ended||disabled)return;phase='off';turnOff();notify('off');},5000);
+      let operation;
+      try{operation=track.applyConstraints({advanced:[{torch:true}]});}
+      catch{phase='off';clearTimer(timer);timer=null;turnOff();notify('failed');return;}
+      Promise.resolve(operation).then(()=>{
+        // A slow ON call can finish after the OFF call, cancellation or stop.
+        // Reapply OFF in that case; never turn the light back on or restart time.
+        if(ended||disabled||phase!=='on'){turnOff();return;}
+        notify('on');
+      },()=>{
+        if(ended||disabled)return;
+        phase='off';clearTimer(timer);timer=null;turnOff();notify('failed');
+      });
+    }
+    return Object.freeze({supported,start,finish,disable});
+  }
+  return Object.freeze({measureFrame,inspectFrame,stopRecorder,createLightCycle});
 });

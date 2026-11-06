@@ -2,6 +2,8 @@
 
 import io
 import secrets
+import threading
+from collections import Counter
 import zipfile
 
 import cv2
@@ -207,21 +209,33 @@ def test_auto_publish_waits_for_ai_and_polling_does_not_mutate_or_publish(setup)
 def test_failed_partial_render_retries_the_full_set_without_repeating_ai(setup):
     client, _, _, monkeypatch = setup
     original_renderer = ih.marked_photo
-    renders, comparisons = [], []
+    renders, comparisons, active = [], [], Counter()
+    lock = threading.Lock()
     def fail_once(content, publication_id, captured):
-        renders.append(publication_id)
-        if len(renders) == 3:
-            raise RuntimeError("private renderer detail must never enter the result")
-        return original_renderer(content, publication_id, captured)
+        with lock:
+            assert not any(count and key != publication_id for key,count in active.items()), "Retry overlapped an unfinished render attempt"
+            active[publication_id] += 1
+            renders.append(publication_id)
+            attempts = list(dict.fromkeys(renders))
+            should_fail = len(attempts) == 1 and renders.count(publication_id) == 3
+        try:
+            if should_fail:
+                raise RuntimeError("private renderer detail must never enter the result")
+            return original_renderer(content, publication_id, captured)
+        finally:
+            with lock:
+                active[publication_id] -= 1
     monkeypatch.setattr(ih, "marked_photo", fail_once)
     record = check_video(setup, auto_publish=True, comparison_calls=comparisons)
     result = phone_result(client, record)
     assert result["status"] == "confirmed" and result["publication_status"] == "ready"
     assert len(result["publication"]["photos"]) == 4
     assert comparisons == [ih.VisualAssessment]
-    assert len(renders) == 7
-    assert len(set(renders[:3])) == 1 and len(set(renders[3:])) == 1
-    assert renders[0] != renders[3]
+    attempts = Counter(renders)
+    assert len(attempts) == 2
+    assert 3 <= next(iter(attempts.values())) <= 4
+    assert list(attempts.values())[1] == 4
+    assert not any(active.values()), "Every failed-attempt future must finish before retry returns"
     with ih.database() as db:
         assert db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='marked'", (record["id"],)).fetchone()[0] == 4
         assert db.execute("SELECT COUNT(*) FROM ih_publications WHERE request_id=?", (record["id"],)).fetchone()[0] == 1
@@ -232,12 +246,21 @@ def test_failed_partial_render_retries_the_full_set_without_repeating_ai(setup):
 def test_persistent_render_failure_is_bounded_atomic_and_preserves_ai_result(setup):
     client, _, _, monkeypatch = setup
     original_renderer = ih.marked_photo
-    renders, comparisons = [], []
+    renders, comparisons, active = [], [], Counter()
+    lock = threading.Lock()
     def fail_each_attempt(content, publication_id, captured):
-        renders.append(publication_id)
-        if len(renders) % 3 == 0:
-            raise RuntimeError("private renderer detail must never enter the result")
-        return original_renderer(content, publication_id, captured)
+        with lock:
+            assert not any(count and key != publication_id for key,count in active.items()), "Retry overlapped an unfinished render attempt"
+            active[publication_id] += 1
+            renders.append(publication_id)
+            should_fail = renders.count(publication_id) == 3
+        try:
+            if should_fail:
+                raise RuntimeError("private renderer detail must never enter the result")
+            return original_renderer(content, publication_id, captured)
+        finally:
+            with lock:
+                active[publication_id] -= 1
     monkeypatch.setattr(ih, "marked_photo", fail_each_attempt)
     record = check_video(setup, auto_publish=True, comparison_calls=comparisons)
     for _ in range(3):
@@ -246,7 +269,10 @@ def test_persistent_render_failure_is_bounded_atomic_and_preserves_ai_result(set
         assert result["publication_status"] == "failed" and not result.get("publication")
         assert "private renderer detail" not in str(result)
         ih.auto_publish_confirmed(record["id"])
-    assert comparisons == [ih.VisualAssessment] and len(renders) == 6
+    attempts = Counter(renders)
+    assert comparisons == [ih.VisualAssessment] and len(attempts) == 2
+    assert all(3 <= count <= 4 for count in attempts.values())
+    assert not any(active.values())
     assert_no_publication(record)
     assert client.get(BASE + f"/seller/{record['token']}/marked-photos").status_code == 409
     final = owner_detail(client, record)

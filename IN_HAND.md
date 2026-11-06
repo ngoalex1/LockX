@@ -42,6 +42,20 @@ The implementation compares sampled frames; it does not run video-wide forensic 
 
 “LockX In-hand verified” refers to visual correspondence at the recorded time. It is not a certificate of product authenticity, legal ownership, current possession, internal working condition, ticket validity, transfer rights, or shipment. The public record and photo marking must preserve that scope.
 
+## Processing speed and lighting retries
+
+Two seconds after recording ends is a performance target, not a verification deadline or an advertised guarantee. The fixed 10-second capture, original image detail, complete-video decoding, final evidence selection, exact identifier comparison, and publication eligibility checks remain required. A slower model response continues processing; it never becomes an automatic pass or a failure merely because two seconds elapsed. Real-device latency and false-accept/false-reject rates still need measurement.
+
+Photo preparation uses at most two concurrent image decoders and preserves selection order. Camera preview and capture-session setup overlap after recording consent. Video chunks continue uploading during capture, and the server prepares the same reference-ranking features ahead of final comparison in a bounded cache keyed by actual content and inspection. This cache only ranks evidence and cannot verify an item. The final AI comparison still receives every selected photo and the selected frames from the complete decoded recording.
+
+QR/JPEG preparation may run privately alongside the final AI call for an opted-in inspection. Running/queued rendering and speculative preparations are bounded process-wide. No public record or marked-media row exists until the final approved subset is known. Rejected images are discarded. Rendering runs outside the SQLite write transaction; publication atomically rechecks the same inspection, session, references, evidence, eligibility, consent, and withdrawal state before committing. Each complete exported JPEG retains its QR-decode validation. Rendering errors cannot change the AI finding or cause a partial database commit.
+
+`GET /api/v1/in-hand/seller/{token}/events` provides a bounded read-only event stream containing only status fields and an opaque revision. Changes trigger an ordinary scoped result fetch immediately; polling remains the fallback. Streams cannot start analysis/publication jobs or reveal the management key, private video, original photos, or detailed model response. Connections have per-inspection and process-wide limits. Each approved JPEG is fetched once and reused as both the displayed image and the native-share `File`; object URLs are revoked on navigation, withdrawal refresh, or page teardown. Server image responses remain non-cacheable.
+
+The first recording uses normal lighting. An optional **Record again with light** action appears only when a completed inconclusive inspection has no verified photos or identifier/photo contradictions and both decoded-video diagnostics and the structured AI finding identify low light or motion blur as the reason. Blur alone is not treated as shakiness; motion advice also requires repeated reliable direction changes. Missing views, item mismatches, different numbers, incomplete recordings, provider failures, and shared integrity problems cannot enable this light-assisted retry.
+
+The retry creates a fresh inspection using the same photos and original consent settings; the failed evidence remains intact. The explicit retry action permits recording to start on the new capture page without another consent click. Server-provided retry eligibility is required; URL parameters cannot enable the light. On a supported rear-camera track, the retry requests light on for the first five seconds, then off for the remaining five. **Light off** disables the cycle if it causes glare. Unsupported, denied, or delayed flashlight controls fall back to normal camera recording, never extend the 10-second timer, and are shut down on stop/cancellation. Flashlight controls are capture aids, not proof of camera origin or authenticity. Physical iPhone/Android flashlight behavior has not been established by synthetic tests.
+
 ## Deployment and validation remaining
 
 This is an initial implementation, not a validated fraud-detection system. Before a public launch:
@@ -59,6 +73,8 @@ This is an initial implementation, not a validated fraud-detection system. Befor
 node --check in-hand.js
 node --check in-hand-capture.js
 node --test test_in_hand_capture.cjs
+node --test test_in_hand_light.cjs
+node --test test_in_hand_frontend_speed.mjs
 ```
 
 The In-hand tests cover legacy and automatic capture protocols, grouped reference coverage, local quality and motion gates, chunk ordering/idempotency/conflicts/limits, scoped asynchronous follow-ups, real assembled-video decoding, account and anonymous access boundaries, per-inspection management-key isolation, immutable reference access, stage ordering/time limits, session restart, quality warnings, interactive follow-up, real video decoding, replay rejection, conservative result rules, publication consent, actual QR decoding, ZIP compatibility, and withdrawal. Partial-set regressions cover a three-of-four result, complete-JPEG QR decoding for every passed export, preserved original photo indices, exact-number failures, unclear references, shared evidence blockers, legacy consent restrictions, scoped explicit opt-in, atomic render retries, immutable manifests, and private failed photos/video. Browser QA covers photo selection, link creation, seller preflight, responsive layout, and an actual fixed 10-second MediaRecorder round trip with jitter/exposure fluctuations and camera frame callbacks disabled using a local synthetic camera stream. The local-only camera harness is never included in deployed assets. Physical iPhone/Android camera recording and model accuracy have not been established by these tests.

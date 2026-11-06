@@ -2,12 +2,14 @@
 
 import io
 import json
+import threading
+from collections import Counter
 import zipfile
 
 import pytest
 
 import in_hand as ih
-from test_in_hand import BASE, assessment, setup
+from test_in_hand import BASE, assessment, jpeg, setup
 from test_in_hand_auto_publish import (
     assert_no_publication, check_video, decode_marking, owner_detail,
     owner_headers, phone_result,
@@ -330,12 +332,27 @@ def test_incomplete_persisted_manifest_cannot_silently_shrink_a_verified_cohort(
 def test_subset_render_failure_is_atomic_and_never_repeats_the_comparison(setup, persistent):
     client, _, _, monkeypatch = setup
     original_renderer = ih.marked_photo
-    renders, comparisons = [], []
+    renders, comparisons, active = [], [], Counter()
+    lock = threading.Lock()
+    # Reference 0 is approved in this fixture. A speculative render error on
+    # rejected reference 1 must not accidentally make this retry test pass.
+    target = ih.clean_photo(jpeg(0))
+    failed_attempts = set()
     def fail_during_subset(content, publication_id, captured):
-        renders.append(publication_id)
-        if len(renders) == 2 or (persistent and len(renders) == 4):
-            raise RuntimeError("private render error must not leak")
-        return original_renderer(content, publication_id, captured)
+        with lock:
+            assert not any(count and key != publication_id for key,count in active.items()), "Retry overlapped an unfinished render attempt"
+            active[publication_id] += 1
+            renders.append(publication_id)
+            should_fail = content == target and (persistent or not failed_attempts)
+            if should_fail:
+                failed_attempts.add(publication_id)
+        try:
+            if should_fail:
+                raise RuntimeError("private render error must not leak")
+            return original_renderer(content, publication_id, captured)
+        finally:
+            with lock:
+                active[publication_id] -= 1
     monkeypatch.setattr(ih, "marked_photo", fail_during_subset)
     record = partial_check(setup, comparison_calls=comparisons)
     result = phone_result(client, record)
@@ -343,18 +360,23 @@ def test_subset_render_failure_is_atomic_and_never_repeats_the_comparison(setup,
     assert_subset(result, [0, 2, 3])
     assert comparisons == [ih.VisualAssessment]
     assert "private render error" not in str(result)
+    attempts = Counter(renders)
+    assert len(attempts) == 2
+    assert all(1 <= count <= 4 for count in attempts.values())
+    assert list(attempts.values())[1] <= 3
+    assert not any(active.values())
     if persistent:
         assert result["publication_status"] == "failed" and not result.get("publication")
-        assert len(renders) == 4
+        assert len(failed_attempts) == 2
         assert_no_publication(record)
+        before_retry = list(renders)
         ih.auto_publish_confirmed(record["id"])
-        assert len(renders) == 4
+        assert renders == before_retry, "Persistent failure must stay within two attempts"
     else:
         assert result["publication_status"] == "ready"
         assert len(result["publication"]["photos"]) == 3
-        assert len(renders) == 5
-        assert renders[0] == renders[1] and renders[2] == renders[3] == renders[4]
-        assert renders[0] != renders[2]
+        assert len(failed_attempts) == 1
+        assert list(attempts.values())[1] == 3
         with ih.database() as db:
             assert db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='marked'", (record["id"],)).fetchone()[0] == 3
     private = owner_detail(client, record)

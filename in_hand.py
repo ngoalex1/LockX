@@ -1,4 +1,5 @@
 """Private listing-to-live evidence, browser capture, and conservative visual findings."""
+import asyncio
 import base64
 import hashlib
 import io
@@ -12,9 +13,12 @@ import sqlite3
 import tempfile
 import time
 import zipfile
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import BoundedSemaphore, Lock
 from time import perf_counter
 from typing import Literal
 from uuid import uuid4
@@ -23,7 +27,7 @@ import cv2
 import httpx
 import numpy as np
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from PIL import Image, ImageDraw, ImageFont
 from lost_found import MAX_IMAGE, clean_photo, limited
@@ -32,14 +36,34 @@ log = logging.getLogger("lockx.in_hand")
 MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 6, 60 * 1024 * 1024, 4
 SCAN_MIN_SECONDS, SCAN_MAX_SECONDS = 12, 90
 SCAN_MAX_CHUNK, SCAN_MAX_CHUNKS = 8 * 1024 * 1024, 180
+RESULT_STREAM_MAX_SECONDS, RESULT_STREAM_POLL_SECONDS = 180, .15
+RESULT_STREAM_HEARTBEAT_SECONDS = 10
+# Bounded process-wide resources: never launch one CPU thread per seller/photo.
+_export_workers = ThreadPoolExecutor(max_workers=3, thread_name_prefix="lockx-export")
+_export_slots = BoundedSemaphore(12)
+_preparation_slots = BoundedSemaphore(2)
+_reference_cache, _qr_cache = OrderedDict(), OrderedDict()
+_reference_lock, _qr_lock = Lock(), Lock()
+_stream_lock, _active_streams = Lock(), {}
+RESULT_STREAM_MAX_ACTIVE, RESULT_STREAM_MAX_PER_REQUEST = 32, 2
 
 
 @contextmanager
-def database():
+def database(*, read_only=False):
     configured, mount = os.getenv("LOCKX_DATA_DIR"), os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
     if os.getenv("RAILWAY_ENVIRONMENT_ID") and not (configured or mount):
         raise HTTPException(503,"In-hand verification requires persistent storage before accepting photos")
     root = Path(configured or (str(Path(mount) / "lockx") if mount else ".lockx-data"))
+    if read_only:
+        # Event streams never initialize schema, acquire a writer or launch
+        # work. A short read timeout lets the normal GET polling recover.
+        db = sqlite3.connect((root / "in-hand.sqlite3").resolve().as_uri()+"?mode=ro",uri=True,timeout=1)
+        db.row_factory = sqlite3.Row
+        try:
+            yield db
+        finally:
+            db.close()
+        return
     root.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(root / "in-hand.sqlite3", timeout=20)
     db.row_factory = sqlite3.Row
@@ -95,6 +119,9 @@ def database():
       CREATE TABLE IF NOT EXISTS ih_scan_previews (
         session_id TEXT NOT NULL REFERENCES ih_sessions(id), stage_id TEXT NOT NULL,
         content BLOB NOT NULL, photo_indices TEXT NOT NULL, PRIMARY KEY(session_id,stage_id));
+      CREATE TABLE IF NOT EXISTS ih_capture_retries (
+        parent_request_id TEXT PRIMARY KEY REFERENCES ih_requests(id),
+        request_id TEXT NOT NULL UNIQUE REFERENCES ih_requests(id), reason TEXT NOT NULL);
     """)
     try:
         yield db
@@ -176,6 +203,11 @@ class MatchedPhotoConsent(BaseModel):
     consent: Literal[True]
 
 
+class CaptureRetryConsent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent: Literal[True]
+
+
 class Finding(BaseModel):
     model_config = ConfigDict(extra="forbid")
     subject: str
@@ -215,6 +247,7 @@ class VisualAssessment(BaseModel):
     concerns: list[str]
     summary: str
     identifier_checks: list[IdentifierCheck] = Field(default_factory=list, max_length=40)
+    capture_failure_reason: Literal["low_light", "motion_blur", "missing_views", "other"] | None = None
 
 
 class Targets(BaseModel):
@@ -287,6 +320,9 @@ def view(db, row, private=False):
     result = {"id": row["id"], **{k:v for k,v in listing.items() if k != "consent" and (k != "auto_publish" or v is True)},
               "status": status(row), "created": row["created"], "expires": row["expires"],
               "submitted": row["submitted"], "media": media if private else [m for m in media if m["role"] == "listing"]}
+    retry = db.execute("SELECT reason FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()
+    if retry:
+        result["capture_retry_reason"] = retry["reason"]
     if private:
         result.update(token=row["token"], analysis_status=row["analysis_status"], analysis=json.loads(row["analysis"] or "null"),
                       events=[dict(e) for e in db.execute("SELECT name,created FROM ih_events WHERE request_id=? ORDER BY rowid", (row["id"],))])
@@ -564,6 +600,30 @@ def frame_quality(content):
     return {"sharpness":round(sharpness, 2),"brightness":round(light, 2),"feedback":issue}
 
 
+def capture_quality_diagnostics(frames, checks):
+    """Typed retry advice from decoded video, never a verification verdict."""
+    count = len(checks)
+    dark = sum(c["brightness"] < 18 for c in checks)
+    blurred = sum(c["sharpness"] < 12 for c in checks)
+    shifts, previous = [], None
+    # Low sharpness alone may be defocus or a featureless item. Only suggest a
+    # motion retry when decoded samples also show repeated direction changes.
+    if count and blurred > count/2 and dark <= count/2:
+        for _, content, _ in frames:
+            picture = cv2.imdecode(np.frombuffer(content,np.uint8),cv2.IMREAD_GRAYSCALE)
+            picture = cv2.resize(picture,(160,120)).astype(np.float32)
+            if previous is not None:
+                shift, response = cv2.phaseCorrelate(previous,picture)
+                if response > .15 and all(math.isfinite(v) for v in shift):
+                    shifts.append(np.array(shift))
+            previous = picture
+    reversals = sum(np.linalg.norm(a) > 4 and np.linalg.norm(b) > 4 and float(np.dot(a,b)) < -8
+                    for a,b in zip(shifts,shifts[1:]))
+    reason = "low_light" if count and dark > count/2 else "motion_blur" if count and blurred > count/2 and reversals >= 2 else None
+    return {"sampled_frames":count,"low_light_frames":dark,"blurred_frames":blurred,
+            "motion_direction_reversals":int(reversals),"retry_reason":reason}
+
+
 def check_reference_view(token, data, content, quality):
     """An advisory follow-up prompt. Final approval always uses the uploaded video."""
     if not visual_ready() or (quality["feedback"] and not data.continue_with_quality_issue):
@@ -643,6 +703,7 @@ def examine_video(content, session):
             if any(o.get("quality_override") for o in observations):
                 notes.append("The seller continued past a camera quality warning.")
             return frames, {"duration_seconds":round(duration,2),"sampled_frames":len(frames),"notes":notes,
+                            "quality_diagnostics":capture_quality_diagnostics(frames,checks),
                             "capture_integrity":"unattested_browser_recording","depth":"not_captured"}
         finally:
             cap.release()
@@ -727,6 +788,7 @@ def examine_scan_video(content, session):
             if any(o.get("quality_override") for o in observations):
                 notes.append("The seller continued past a camera quality warning.")
             return frames,{"duration_seconds":round(duration,2),"decoded_frames":decoded,"sampled_frames":len(frames),
+                           "quality_diagnostics":capture_quality_diagnostics(frames,quality_checks),
                            "notes":notes,"capture_integrity":"unattested_browser_recording","depth":"not_captured",
                            "capture_mode":"continuous_scan"}
         finally:
@@ -746,7 +808,9 @@ def finish_scan_background(request_id, session_id):
             if not sess or not meta or not video:
                 raise ValueError("Missing continuous scan data")
             session_copy = {**dict(sess),"scan_min_seconds":meta["min_seconds"],"scan_max_seconds":meta["max_seconds"]}
+        decoding_started = perf_counter()
         frames, checks = examine_video(video[0],session_copy)
+        checks["decode_ms"] = round((perf_counter()-decoding_started)*1000, 2)
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
@@ -774,6 +838,57 @@ def finish_scan_background(request_id, session_id):
             db.execute("DELETE FROM ih_scan_previews WHERE session_id=?",(session_id,))
 
 
+def media_features(media):
+    """Identical ranking features for warm references and final decoded evidence."""
+    try:
+        picture = cv2.imdecode(np.frombuffer(media["content"], dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if picture is None:
+            return [], None, 0.0
+        height, width = picture.shape
+        scale = min(1, 640 / max(height, width))
+        if scale < 1:
+            picture = cv2.resize(picture, (max(1, round(width*scale)), max(1, round(height*scale))))
+        light = float(picture.mean())
+        sharpness = float(cv2.Laplacian(picture, cv2.CV_64F).var())
+        quality = min(1, math.log1p(sharpness)/math.log(1001)) if 12 < light < 250 else 0
+        detector = cv2.ORB_create(nfeatures=700, nlevels=6, fastThreshold=12)
+        points, descriptors = detector.detectAndCompute(picture, None)
+        return points, descriptors, quality
+    except (cv2.error, TypeError, ValueError, KeyError):
+        return [], None, 0.0
+
+
+def reference_features(media):
+    """A small immutable content cache; never reuse features after bytes change."""
+    keys = media.keys()
+    digest = hashlib.sha256(media["content"]).hexdigest()
+    key = (media["request_id"] if "request_id" in keys else "",
+           media["id"] if "id" in keys else "", digest)
+    with _reference_lock:
+        if key in _reference_cache:
+            _reference_cache.move_to_end(key)
+            return _reference_cache[key]
+    result = media_features(media)
+    with _reference_lock:
+        _reference_cache[key] = result
+        _reference_cache.move_to_end(key)
+        while len(_reference_cache) > 64:
+            _reference_cache.popitem(last=False)
+    return result
+
+
+def prepare_reference_features(request_id):
+    """Warm only ranking inputs during capture; this performs no AI verification."""
+    try:
+        with database() as db:
+            refs = db.execute("SELECT id,request_id,content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(request_id,)).fetchall()
+        for reference in refs:
+            reference_features(reference)
+    except Exception:
+        # Preparation is optional. The complete final ranker can recompute.
+        log.warning("Reference preparation unavailable for %s", request_id)
+
+
 def select_evidence_frames(refs, frames, max_frames=12):
     """Rank real extracted frames, never use feature similarity as an item verdict.
 
@@ -788,30 +903,11 @@ def select_evidence_frames(refs, frames, max_frames=12):
     if count <= limit:
         selected = list(range(count))
     else:
-        detector = cv2.ORB_create(nfeatures=700, nlevels=6, fastThreshold=12)
-
-        def features(media):
-            try:
-                picture = cv2.imdecode(np.frombuffer(media["content"], dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-                if picture is None:
-                    return [], None, 0.0
-                height, width = picture.shape
-                scale = min(1, 640 / max(height, width))
-                if scale < 1:
-                    picture = cv2.resize(picture, (max(1, round(width*scale)), max(1, round(height*scale))))
-                light = float(picture.mean())
-                sharpness = float(cv2.Laplacian(picture, cv2.CV_64F).var())
-                quality = min(1, math.log1p(sharpness)/math.log(1001)) if 12 < light < 250 else 0
-                points, descriptors = detector.detectAndCompute(picture, None)
-                return points, descriptors, quality
-            except (cv2.error, TypeError, ValueError, KeyError):
-                return [], None, 0.0
-
-        frame_features = [features(frame) for frame in frames]
+        frame_features = [media_features(frame) for frame in frames]
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
         rankings = []
         for reference in refs:
-            points, descriptors, _ = features(reference)
+            points, descriptors, _ = reference_features(reference)
             scores = []
             for index, (other_points, other_descriptors, quality) in enumerate(frame_features):
                 matches = []
@@ -936,6 +1032,8 @@ def recommendation(visual, photo_count, checks):
 
 
 def analyze(request_id):
+    analysis_started = perf_counter()
+    preparation = None
     with database() as db:
         changed = db.execute("UPDATE ih_requests SET analysis_status='processing' WHERE id=? AND analysis_status='pending'", (request_id,)).rowcount
         row = db.execute("SELECT * FROM ih_requests WHERE id=?", (request_id,)).fetchone()
@@ -959,6 +1057,9 @@ def analyze(request_id):
             raise ValueError("Missing extracted comparison evidence")
         selected, selection = select_evidence_frames(refs, frames)
         analysis["video"]["frame_selection"] = selection
+        # The future QR images are memory-only. No public ID is reachable until
+        # complete-video verification and a second transactional check succeed.
+        preparation = prepare_exports(row,refs,session)
         content = [{"type":"input_text","text":json.dumps({"listing":listing,"ordered_actions":json.loads(session["stages"]),"observed_stage_timing":json.loads(session["observations"]),"video_checks":analysis["video"]})}]
         for role, indexed_images in (("reference",enumerate(refs)),("video_frame",((i, frames[i]) for i in selected))):
             for i,m in indexed_images:
@@ -988,7 +1089,11 @@ def analyze(request_id):
             "Reserve concerns for shared capture or item-identity problems affecting every reference, such as substitution, inconsistent continuity or an unfulfilled challenge. "
             "Put a reference-specific mismatch or missing view in that photo's finding/evidence, not concerns. "
             "A photos finding of supported means that reference independently matches the same individual item, even when another reference differs. "
-            "same_item summarizes the complete reference set and may be contradicted or inconclusive when only some references fail. Insufficient evidence is inconclusive.", content,
+            "same_item summarizes the complete reference set and may be contradicted or inconclusive when only some references fail. Insufficient evidence is inconclusive. "
+            "Set capture_failure_reason to low_light or motion_blur ONLY when the supplied quality_diagnostics.retry_reason agrees, every reference view was attempted, "
+            "and that camera-quality problem is the sole reason no match can be established. Use missing_views if any reference view was not attempted; "
+            "use other for any different or additional failure, and null when no capture failure exists. Blur alone does not establish camera shake. "
+            "This diagnostic never excuses an identifying-number difference, substitution, an unfulfilled challenge or suspicious continuity.", content,
             allowed_frame_indices=selected, photo_count=len(refs))
         analysis["video"]["vision_ms"] = round((perf_counter()-comparison_started)*1000, 2)
         if {p.photo_index for p in visual.photos} != set(range(len(refs))) or len(visual.photos) != len(refs):
@@ -1018,6 +1123,7 @@ def analyze(request_id):
         if "Capture ended before every required view was collected." in analysis["video"].get("notes",[]):
             summary = "Capture ended before every required view was collected. " + summary
         analysis.update(visual=visual.model_dump(), result=result, summary=summary)
+        analysis["video"]["analysis_ms"] = round((perf_counter()-analysis_started)*1000,2)
         with database() as db:
             db.execute("UPDATE ih_requests SET status=?,analysis_status='complete',analysis=? WHERE id=?", (result,json.dumps(analysis),request_id))
             event(db, request_id, "Selected photos and written claims compared with server-extracted video frames")
@@ -1040,19 +1146,46 @@ def analyze(request_id):
         analysis.update(result="inconclusive",summary="The recording is preserved, but the automated comparison could not be completed.")
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?", (json.dumps(analysis),request_id))
+    except Exception:
+        if preparation is not None:
+            preparation.close()
+        raise
     # Rendering a QR export must never turn a valid AI comparison into a failed
     # comparison. Publication has its own bounded, separately committed outcome.
-    auto_publish_confirmed(request_id)
+    try:
+        auto_publish_confirmed(request_id,preparation)
+    finally:
+        if preparation is not None:
+            preparation.close()
 
 
 SCOPE = "Visual correspondence with the selected photos at the recorded time. This does not certify product authenticity, ownership, present possession, ticket validity, or delivery."
 
 
+def publication_link(publication_id):
+    origin = os.getenv("LOCKX_PUBLIC_APP_ORIGIN", "https://lockx.ai").rstrip("/")
+    return origin + "/#in-hand/verify/" + publication_id
+
+
+def qr_image(link, box_size, mask):
+    """Build each shared QR matrix once, including alternate readability masks."""
+    import qrcode
+    key = (link, box_size, mask)
+    with _qr_lock:
+        if key not in _qr_cache:
+            code = qrcode.QRCode(box_size=box_size,border=4,error_correction=qrcode.constants.ERROR_CORRECT_M,mask_pattern=mask)
+            code.add_data(link)
+            code.make(fit=True)
+            _qr_cache[key] = code.make_image(fill_color="black",back_color="white").convert("RGB")
+        _qr_cache.move_to_end(key)
+        while len(_qr_cache) > 24:
+            _qr_cache.popitem(last=False)
+        return _qr_cache[key].copy()
+
+
 def marked_photo(content, publication_id, captured):
     """Link to the canonical record without covering identifying item details."""
-    import qrcode
-    origin = os.getenv("LOCKX_PUBLIC_APP_ORIGIN", "https://lockx.ai").rstrip("/")
-    link = origin + "/#in-hand/verify/" + publication_id
+    link = publication_link(publication_id)
     picture = Image.open(io.BytesIO(content)).convert("RGB")
     large, small = ImageFont.load_default(size=28), ImageFont.load_default(size=20)
     date = time.strftime("%b %d, %Y %H:%M UTC", time.gmtime(captured))
@@ -1064,10 +1197,7 @@ def marked_photo(content, publication_id, captured):
     detector = cv2.QRCodeDetector()
     for box_size in (module_size,module_size+2):
         for mask in range(8):
-            code = qrcode.QRCode(box_size=box_size,border=4,error_correction=qrcode.constants.ERROR_CORRECT_M,mask_pattern=mask)
-            code.add_data(link)
-            code.make(fit=True)
-            qr = code.make_image(fill_color="black",back_color="white").convert("RGB")
+            qr = qr_image(link, box_size, mask)
             width = max(800, picture.width, qr.width+580)
             height = round(picture.height * width / picture.width)
             footer = max(250,qr.height+40)
@@ -1087,6 +1217,78 @@ def marked_photo(content, publication_id, captured):
             if decoded == link:
                 return exported
     raise ValueError("The exported QR image could not be read reliably")
+
+
+def submit_export(content, publication_id, captured, *, speculative=False):
+    """Bound both running CPU work and queued image buffers across requests."""
+    if not _export_slots.acquire(blocking=not speculative):
+        return None
+    try:
+        future = _export_workers.submit(marked_photo,content,publication_id,captured)
+    except Exception:
+        _export_slots.release()
+        raise
+    future.add_done_callback(lambda _: _export_slots.release())
+    return future
+
+
+class ExportPreparation:
+    """Private, bounded preparation. No publication/media row exists yet."""
+    def __init__(self, row, refs, captured):
+        self.request_id, self.session_id = row["id"], row["session_id"]
+        self.captured, self.publication_id = captured, secrets.token_hex(8)
+        self.references = [(r["id"],hashlib.sha256(r["content"]).hexdigest()) for r in refs]
+        self.futures, self.lock = {}, Lock()
+        self.released, self.closed = False, False
+        self.started = perf_counter()
+
+    def matches(self, snapshot):
+        return (self.request_id == snapshot["request_id"] and self.session_id == snapshot["session_id"]
+                and self.captured == snapshot["captured"] and self.references == snapshot["references"])
+
+    def rendered(self, indices):
+        # Finish/cancel a complete attempt before a possible retry. Failures on
+        # rejected photos do not block approved photos from being published.
+        wait(list(self.futures.values()))
+        return {i:self.futures[i].result() for i in indices}
+
+    def close(self):
+        self.closed = True
+        for future in self.futures.values():
+            future.cancel()
+        def release_when_done(_=None):
+            with self.lock:
+                if not self.released and all(f.done() for f in self.futures.values()):
+                    self.released = True
+                    _preparation_slots.release()
+        for future in self.futures.values():
+            future.add_done_callback(release_when_done)
+        release_when_done()
+
+
+def prepare_exports(row, refs, session):
+    """Overlap JPEG+QR work with vision; release none until final approval."""
+    if (json.loads(row["listing"]).get("auto_publish") is not True or not session
+            or not session["finished"] or not 1 <= len(refs) <= MAX_PHOTOS
+            or not _preparation_slots.acquire(blocking=False)):
+        return None
+    preparation = None
+    try:
+        preparation = ExportPreparation(row,refs,session["finished"])
+        for i, reference in enumerate(refs):
+            future = submit_export(reference["content"],preparation.publication_id,preparation.captured,speculative=True)
+            if future is None:
+                preparation.close()
+                return None
+            preparation.futures[i] = future
+        return preparation
+    except Exception:
+        if preparation is not None:
+            preparation.close()
+        else:
+            _preparation_slots.release()
+        log.warning("Private export preparation unavailable for %s", row["id"])
+        return None
 
 
 def photo_eligibility(db, row):
@@ -1162,11 +1364,22 @@ def publication_manifest(db, row, publication, eligibility=None):
             "eligible_photo_indices":indices,"verified_count":len(photos),"total_count":total,"partial":len(photos)<total}
 
 
-def publish_confirmed_photos(db, row):
-    """Atomically mark only approved references; aggregate result stays intact."""
+def publication_snapshot(db, row):
+    """Capture all approval inputs for a second check after private CPU work."""
     eligibility = photo_eligibility(db,row)
     if not eligibility["verified_count"]:
         raise HTTPException(409,"Only individually matched physical-item photos can receive a public verification marking")
+    refs = db.execute("SELECT id,content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
+    session = db.execute("SELECT * FROM ih_sessions WHERE id=? AND request_id=?",(row["session_id"],row["id"])).fetchone()
+    references = [(r["id"],hashlib.sha256(r["content"]).hexdigest()) for r in refs]
+    evidence = [tuple(m) for m in db.execute("SELECT id,role,sha256,seconds,label FROM ih_media WHERE request_id=? AND role IN ('listing','video','frame') ORDER BY rowid",(row["id"],))]
+    state = {key:row[key] for key in ("id","owner_id","session_id","listing","analysis","analysis_status","status")}
+    fingerprint = hashlib.sha256(json.dumps([state,dict(session),references,evidence,eligibility],sort_keys=True).encode()).hexdigest()
+    return {"request_id":row["id"],"session_id":row["session_id"],"captured":session["finished"],
+            "references":references,"contents":[r["content"] for r in refs],"eligibility":eligibility,"fingerprint":fingerprint}
+
+
+def existing_publication(db, row, eligibility):
     prior = db.execute("SELECT * FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
     if prior:
         if prior["revoked"]:
@@ -1174,23 +1387,69 @@ def publish_confirmed_photos(db, row):
         if not publication_manifest(db,row,prior,eligibility):
             raise HTTPException(409,"This verification record is no longer valid")
         return prior["id"]
-    refs = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
-    session = db.execute("SELECT finished FROM ih_sessions WHERE id=?",(row["session_id"],)).fetchone()
-    publication_id = secrets.token_hex(8)
+
+
+def render_publication(snapshot, preparation=None):
+    """Parallel CPU work without a SQLite writer, bounded across all sellers."""
+    indices = snapshot["eligibility"]["eligible_photo_indices"]
+    if preparation is not None and preparation.matches(snapshot):
+        return preparation.publication_id, preparation.rendered(indices)
+    publication_id, futures = secrets.token_hex(8), {}
+    try:
+        for i in indices:
+            futures[i] = submit_export(snapshot["contents"][i],publication_id,snapshot["captured"])
+        wait(list(futures.values()))
+        return publication_id, {i:future.result() for i,future in futures.items()}
+    finally:
+        # A retry cannot overlap unfinished work from a failed attempt.
+        for future in futures.values():
+            future.cancel()
+        wait(list(futures.values()))
+
+
+def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False):
+    """Render privately, then atomically commit an unchanged approved cohort."""
+    started = perf_counter()
+    if db.in_transaction:
+        raise RuntimeError("Photo rendering must start outside a write transaction")
+    row = db.execute("SELECT * FROM ih_requests WHERE id=?",(row["id"],)).fetchone()
+    snapshot = publication_snapshot(db,row)
+    prior = existing_publication(db,row,snapshot["eligibility"])
+    if prior:
+        return prior
+    render_started = perf_counter()
+    publication_id, rendered = render_publication(snapshot,preparation)
+    render_ms = round((perf_counter()-render_started)*1000,2)
+    write_started = perf_counter()
+    db.execute("BEGIN IMMEDIATE")
+    row = db.execute("SELECT * FROM ih_requests WHERE id=?",(snapshot["request_id"],)).fetchone()
+    current = publication_snapshot(db,row)
+    prior = existing_publication(db,row,current["eligibility"])
+    if prior:
+        return prior
+    if (snapshot["fingerprint"] != current["fingerprint"] or
+            (require_auto and not automatic_publication_allowed(json.loads(row["listing"]),current["eligibility"]))):
+        raise HTTPException(409,"The verification changed while its photos were being prepared")
+    eligibility = current["eligibility"]
     db.execute("INSERT INTO ih_publications VALUES (?,?,?,NULL)",(publication_id,row["id"],time.time()))
-    db.execute("INSERT INTO ih_publication_scopes VALUES (?,?)",(publication_id,len(refs)))
+    db.execute("INSERT INTO ih_publication_scopes VALUES (?,?)",(publication_id,eligibility["total_count"]))
     # The stored original index never collapses after a failed middle photo.
     # Originals, video and rejected references remain capability-protected.
     for i in eligibility["eligible_photo_indices"]:
-        media_id = store_media(db,row["id"],"marked","image/jpeg",marked_photo(refs[i][0],publication_id,session["finished"]),label=f"Verified photo {i+1}")
+        media_id = store_media(db,row["id"],"marked","image/jpeg",rendered[i],label=f"Verified photo {i+1}")
         db.execute("INSERT INTO ih_publication_photos VALUES (?,?,?)",(publication_id,i,media_id))
-    event(db,row["id"],f"{eligibility['verified_count']} of {len(refs)} matched photos published with verification markings")
+    analysis = json.loads(row["analysis"])
+    analysis["video"]["publication_timing"] = {"render_wait_ms":render_ms,
+        "write_ms":round((perf_counter()-write_started)*1000,2),"total_ms":round((perf_counter()-started)*1000,2),
+        "prepared_during_comparison":bool(preparation is not None and preparation.matches(snapshot))}
+    db.execute("UPDATE ih_requests SET analysis=? WHERE id=?",(json.dumps(analysis),row["id"]))
+    event(db,row["id"],f"{eligibility['verified_count']} of {eligibility['total_count']} matched photos published with verification markings")
     return publication_id
 
 
-def auto_publish_confirmed(request_id):
+def auto_publish_confirmed(request_id, preparation=None):
     """At most two rendering attempts, without repeating the AI comparison."""
-    for _ in range(2):
+    for attempt_index in range(2):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
@@ -1207,9 +1466,8 @@ def auto_publish_confirmed(request_id):
             db.execute("INSERT INTO ih_publication_jobs VALUES (?,'processing',?,?) ON CONFLICT(request_id) DO UPDATE SET state='processing',attempts=excluded.attempts,updated=excluded.updated",(request_id,attempts,time.time()))
         try:
             with database() as db:
-                db.execute("BEGIN IMMEDIATE")
                 row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
-                publish_confirmed_photos(db,row)
+                publish_confirmed_photos(db,row,preparation if attempt_index == 0 else None,require_auto=True)
                 db.execute("UPDATE ih_publication_jobs SET state='ready',updated=? WHERE request_id=?",(time.time(),request_id))
             return
         except Exception:
@@ -1250,6 +1508,145 @@ def seller_publication(db, row):
     job = db.execute("SELECT * FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
     failed = job and (job["state"] == "failed" or job["updated"] <= time.time()-120)
     return {**result,"publication_status":"failed" if failed else "pending"}
+
+
+def capture_retry_reason(db, row):
+    """A first quality-only failure may explicitly start one light-assisted retry."""
+    if (row["status"] != "inconclusive" or row["analysis_status"] != "complete"
+            or not identifier_text_allowed(json.loads(row["listing"]))
+            or db.execute("SELECT 1 FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
+            or db.execute("SELECT 1 FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()):
+        return None
+    try:
+        analysis = json.loads(row["analysis"])
+        visual = VisualAssessment.model_validate(analysis["visual"])
+        video = analysis["video"]
+        diagnostic = video.get("quality_diagnostics") or {}
+        reason = diagnostic.get("retry_reason")
+        samples = diagnostic.get("sampled_frames")
+        session = db.execute("SELECT finished,observations FROM ih_sessions WHERE id=? AND request_id=?",(row["session_id"],row["id"])).fetchone()
+        frame_count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='frame'",(row["id"],)).fetchone()[0]
+        if (reason not in {"low_light","motion_blur"} or visual.capture_failure_reason != reason
+                or type(samples) is not int or samples < 4
+                or not session or not session["finished"] or frame_count < samples
+                or any(o.get("partial_capture") or o.get("quality_override") for o in json.loads(session["observations"]))
+                or video.get("notes") != ["Most sampled views have lighting or focus issues."]
+                or visual.same_item == "contradicted" or visual.continuity == "suspicious"
+                or visual.challenge_actions == "not_followed" or visual.concerns
+                or any(p.finding == "contradicted" for p in [*visual.photos,*visual.claims])
+                or any(not c.reference_text.strip() or normalized_identifier_check(c).finding == "contradicted" for c in visual.identifier_checks)
+                or photo_eligibility(db,row)["verified_count"]):
+            return None
+        if reason == "low_light" and diagnostic.get("low_light_frames",0) > samples/2:
+            return reason
+        if (reason == "motion_blur" and diagnostic.get("blurred_frames",0) > samples/2
+                and diagnostic.get("motion_direction_reversals",0) >= 2):
+            return reason
+    except (ValidationError,ValueError,TypeError,KeyError):
+        pass
+    return None
+
+
+def seller_result_payload(db, row):
+    """The same capability-limited result used by GET; no owner/private video."""
+    analysis = json.loads(row["analysis"] or "{}")
+    eligibility = photo_eligibility(db,row)
+    count = eligibility["total_count"]
+    findings = {}
+    visual = analysis.get("visual") or {}
+    for photo in visual.get("photos") or []:
+        if not isinstance(photo,dict):
+            continue
+        index = photo.get("photo_index")
+        if type(index) is int and 0 <= index < count and photo.get("finding") in {"supported","contradicted","not_established"}:
+            findings[index] = {"photo_index":index,"finding":photo["finding"],"evidence":str(photo.get("evidence") or "")}
+    identifiers = []
+    if identifier_text_allowed(json.loads(row["listing"])):
+        for raw in visual.get("identifier_checks") or []:
+            try:
+                check = normalized_identifier_check(IdentifierCheck.model_validate(raw))
+            except (ValidationError, TypeError):
+                continue
+            if (not 0 <= check.photo_index < count or
+                    re.search(r"barcode|\bqr\b|password|credential|access.?code|redemption", check.label, re.I)):
+                continue
+            identifiers.append({"photo_index":check.photo_index,"label":check.label[:100],
+                "reference_text":check.reference_text[:512],"video_text":check.video_text[:512],
+                "readability":check.readability,"finding":check.finding,"evidence":check.evidence[:500]})
+    current_status = status(row)
+    pending = current_status in {"waiting","capturing","processing"}
+    fallback = "Awaiting comparison with the camera recording." if pending else "A match has not been established for this photo."
+    return {"id":row["id"],"status":current_status,"analysis_status":row["analysis_status"],
+            "summary":str(analysis.get("summary") or ("Complete the camera scan to compare these photos." if pending else "An item match has not been established.")),
+            "result":analysis.get("result") if analysis.get("result") in {"confirmed","mismatch","inconclusive"} else "inconclusive",
+            "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
+            **({"identifier_checks":identifiers} if identifiers else {}),
+            **eligibility,**seller_publication(db,row),
+            **({"capture_retry_reason":reason} if (reason := capture_retry_reason(db,row)) else {}),
+            "scope":SCOPE}
+
+
+def seller_event_state(token, previous=None):
+    """Poll small change metadata; serialize findings only when something changed."""
+    with database(read_only=True) as db:
+        row = seller(db,token)
+        available(row)
+        publication = db.execute("SELECT id,created,revoked FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
+        job = db.execute("SELECT state,attempts,updated FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
+        mappings = [tuple(m) for m in db.execute("SELECT p.photo_index,p.media_id,m.sha256 FROM ih_publication_photos p JOIN ih_publications v ON v.id=p.publication_id JOIN ih_media m ON m.id=p.media_id WHERE v.request_id=? ORDER BY p.photo_index",(row["id"],))]
+        revision = hashlib.sha256(json.dumps([status(row),row["analysis_status"],row["analysis"],row["listing"],
+            row["session_id"],dict(publication) if publication else None,dict(job) if job else None,mappings],sort_keys=True).encode()).hexdigest()
+        if previous and previous["revision"] == revision:
+            return previous
+        result = seller_result_payload(db,row)
+        return {"status":result["status"],"analysis_status":result["analysis_status"],
+                "publication_status":result.get("publication_status"),"revision":revision}
+
+
+def admit_result_stream(request_id):
+    with _stream_lock:
+        if (sum(_active_streams.values()) >= RESULT_STREAM_MAX_ACTIVE or
+                _active_streams.get(request_id,0) >= RESULT_STREAM_MAX_PER_REQUEST):
+            raise HTTPException(429,"Use the result page while its live update connection recovers",headers={"Retry-After":"5"})
+        _active_streams[request_id] = _active_streams.get(request_id,0)+1
+
+
+def release_result_stream(request_id):
+    with _stream_lock:
+        remaining = _active_streams.get(request_id,0)-1
+        if remaining > 0:
+            _active_streams[request_id] = remaining
+        else:
+            _active_streams.pop(request_id,None)
+
+
+async def iter_seller_result_events(token, request, initial_state=None, admission=None):
+    """Bounded read-only updates. The normal GET owns publication recovery."""
+    started = last_heartbeat = perf_counter()
+    previous, sent_revision = initial_state, None
+    try:
+        while perf_counter()-started < RESULT_STREAM_MAX_SECONDS:
+            if await request.is_disconnected():
+                return
+            try:
+                state = previous if sent_revision is None and previous else await asyncio.to_thread(seller_event_state,token,previous)
+            except (HTTPException, sqlite3.Error):
+                yield 'event: unavailable\ndata: {"status":"unavailable"}\n\n'
+                return
+            if state["revision"] != sent_revision:
+                yield "event: status\ndata: " + json.dumps(state,separators=(",",":")) + "\n\n"
+                sent_revision, last_heartbeat = state["revision"], perf_counter()
+            elif perf_counter()-last_heartbeat >= RESULT_STREAM_HEARTBEAT_SECONDS:
+                yield ": keepalive\n\n"
+                last_heartbeat = perf_counter()
+            previous = state
+            if state["status"] not in {"waiting","capturing","processing"} and state["publication_status"] != "pending":
+                return
+            await asyncio.sleep(RESULT_STREAM_POLL_SECONDS)
+        yield 'event: close\ndata: {"reason":"timeout"}\n\n'
+    finally:
+        if admission is not None:
+            release_result_stream(admission)
 
 
 def marked_zip(publication, images):
@@ -1297,7 +1694,6 @@ def create_router(authenticate):
     def publish(request_id: str, data: Publication, owner=Depends(access)):
         limited("in-hand-publish:" + (owner.owner_id or owner.request_id),30)
         with database() as db:
-            db.execute("BEGIN IMMEDIATE")
             row = owned(db,request_id,owner)
             return {"id":publish_confirmed_photos(db,row)}
 
@@ -1315,8 +1711,13 @@ def create_router(authenticate):
     @router.delete("/requests/{request_id}/publication")
     def withdraw(request_id: str, owner=Depends(access)):
         with database() as db:
+            db.execute("BEGIN IMMEDIATE")
             owned(db,request_id,owner)
-            db.execute("UPDATE ih_publications SET revoked=COALESCE(revoked,?) WHERE request_id=?",(time.time(),request_id))
+            now = time.time()
+            # A withdrawal during private rendering is a permanent tombstone,
+            # even if the first publication transaction has not committed yet.
+            db.execute("INSERT INTO ih_publications VALUES (?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET revoked=COALESCE(revoked,excluded.revoked)",
+                       (secrets.token_hex(8),request_id,now,now))
         return {"status":"withdrawn"}
 
     @router.get("/public/{publication_id}")
@@ -1373,6 +1774,7 @@ def create_router(authenticate):
             result["manage_key"] = management_key
         # The fixed 10-second flow compares once after capture; its unused
         # legacy guided-plan call would compete for model time and add cost.
+        background.add_task(prepare_reference_features,request_id)
         if not listing.auto_publish:
             background.add_task(prepare_scan,request_id)
         return result
@@ -1410,40 +1812,46 @@ def create_router(authenticate):
             row = seller(db,token)
             available(row)
             schedule_publication(db,row,background)
-            analysis = json.loads(row["analysis"] or "{}")
-            eligibility = photo_eligibility(db,row)
-            count = eligibility["total_count"]
-            findings = {}
-            visual = analysis.get("visual") or {}
-            for photo in visual.get("photos") or []:
-                if not isinstance(photo,dict):
-                    continue
-                index = photo.get("photo_index")
-                if type(index) is int and 0 <= index < count and photo.get("finding") in {"supported","contradicted","not_established"}:
-                    findings[index] = {"photo_index":index,"finding":photo["finding"],"evidence":str(photo.get("evidence") or "")}
-            identifiers = []
-            if identifier_text_allowed(json.loads(row["listing"])):
-                for raw in visual.get("identifier_checks") or []:
-                    try:
-                        check = normalized_identifier_check(IdentifierCheck.model_validate(raw))
-                    except (ValidationError, TypeError):
-                        continue
-                    if (not 0 <= check.photo_index < count or
-                            re.search(r"barcode|\bqr\b|password|credential|access.?code|redemption", check.label, re.I)):
-                        continue
-                    identifiers.append({"photo_index":check.photo_index,"label":check.label[:100],
-                        "reference_text":check.reference_text[:512],"video_text":check.video_text[:512],
-                        "readability":check.readability,"finding":check.finding,"evidence":check.evidence[:500]})
-            current_status = status(row)
-            pending = current_status in {"waiting","capturing","processing"}
-            fallback = "Awaiting comparison with the camera recording." if pending else "A match has not been established for this photo."
-            return {"id":row["id"],"status":current_status,"analysis_status":row["analysis_status"],
-                    "summary":str(analysis.get("summary") or ("Complete the camera scan to compare these photos." if pending else "An item match has not been established.")),
-                    "result":analysis.get("result") if analysis.get("result") in {"confirmed","mismatch","inconclusive"} else "inconclusive",
-                    "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
-                    **({"identifier_checks":identifiers} if identifiers else {}),
-                    **eligibility,**seller_publication(db,row),
-                    "scope":SCOPE}
+            return seller_result_payload(db,row)
+
+    @router.get("/seller/{token}/events")
+    def seller_events(token: str, request: Request):
+        # Validate before opening a stream; no AI/publication job is scheduled.
+        with database() as db:
+            row = seller(db,token)
+            available(row)
+            request_id = row["id"]
+        initial = seller_event_state(token)
+        admit_result_stream(request_id)
+        return StreamingResponse(iter_seller_result_events(token,request,initial,request_id),media_type="text/event-stream",
+            headers={"Cache-Control":"private, no-store","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff"})
+
+    @router.post("/seller/{token}/retry-capture",status_code=201)
+    def retry_capture(token: str, data: CaptureRetryConsent, background: BackgroundTasks):
+        """One fresh quality retry with identical photos; old evidence is retained."""
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = seller(db,token)
+            available(row)
+            reason = capture_retry_reason(db,row)
+            if not reason:
+                raise HTTPException(409,"A light-assisted retry is available only after a first low-light or motion-blur capture failure")
+            prior = db.execute("SELECT r.id,r.token FROM ih_capture_retries c JOIN ih_requests r ON r.id=c.request_id WHERE c.parent_request_id=?",(row["id"],)).fetchone()
+            if prior:
+                return {"id":prior["id"],"token":prior["token"],"capture_retry_reason":reason}
+            limited("in-hand-quality-retry:"+row["id"],3)
+            request_id, child_token, now = str(uuid4()), secrets.token_urlsafe(32), time.time()
+            # The capture token cannot edit listing claims, add replacement
+            # references or obtain owner management credentials.
+            db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)",
+                       (request_id,row["owner_id"],child_token,row["listing"],now,now+86400,row["plan"]))
+            references = db.execute("SELECT mime,content,seconds,label FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
+            for media in references:
+                store_media(db,request_id,"listing",media["mime"],media["content"],media["seconds"],media["label"])
+            db.execute("INSERT INTO ih_capture_retries VALUES (?,?,?)",(row["id"],request_id,reason))
+            event(db,request_id,"Fresh quality retry created; original photos and consent preserved")
+        background.add_task(prepare_reference_features,request_id)
+        return {"id":request_id,"token":child_token,"capture_retry_reason":reason}
 
     @router.post("/seller/{token}/enable-matched-photos")
     def enable_matched_photos(token: str, data: MatchedPhotoConsent, background: BackgroundTasks):
