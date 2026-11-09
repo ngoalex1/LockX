@@ -9,7 +9,7 @@
   const labels = {waiting:'Awaiting capture',capturing:'Capture started',processing:'Comparing evidence',confirmed:'In-hand confirmed',mismatch:'Mismatch found',inconclusive:'More evidence needed',expired:'Link expired'};
   const scope = 'This records a visual match at the capture time. It does not certify product authenticity, ownership, current possession, ticket validity, or delivery.';
   let photos = [], capabilities = null, routeNumber = 0, poll = null, reportURLs = [], capture = null, sellerData = null, sellerToken = null, isStandalone = false;
-  let managementKey = '', reportRenderNumber = 0;
+  let managementKey = '', reportRenderNumber = 0, captureStartNumber = 0;
   const reportMedia = new Map();
   let markedFiles=null, photoPreparation=null, sellerEvents=null, sellerEventsDisabled=false, sellerResultNumber=0, sellerResultRequest=null, retryLightToken=null, retryConsentToken=null, autoStartRetryToken=null;
   const secretPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -322,7 +322,8 @@
       const r=await(await api('/public/'+encodeURIComponent(id))).json();if(route!==routeNumber)return;
       if(r.status!=='verified'){shell(`<div class="ih-standalone-content"><span class="ih-kicker">Record ${esc(id)}</span><h1>This record was withdrawn.</h1>${notice('These photos no longer carry an active public LockX record.','warning')}<p>Withdrawn ${esc(date(r.withdrawn))}.</p></div>`);return;}
       const total=r.total_count||r.photo_count,verified=r.verified_count||r.photo_count,partial=!!r.partial||verified<total;
-      shell(`<article class="ih-standalone-content"><span class="ih-public-status">✓ LockX verification record</span><h1>${esc(r.title)}</h1><p>${partial?`These ${verified} approved photos are from a check of ${total} selected photos. ${total-verified===1?'The remaining photo is unverified and is not published here.':`The remaining ${total-verified} photos are unverified and are not published here.`}`:`These exact ${verified} photos were compared with a newly recorded item video.`} Check that the listing shows the same photos and identifying details.</p><div class="ih-public-facts"><div><span>CAPTURED</span><strong>${esc(date(r.captured))}</strong></div><div><span>RECORD ID</span><strong>${esc(r.id)}</strong></div><div><span>PHOTO MATCH</span><strong>${verified} of ${total} selected photos verified</strong></div><div><span>VERIFICATION SCOPE</span><strong>Visual photo-to-item correspondence</strong></div></div><div class="ih-public-gallery">${r.photos.map((p,i)=>{const index=publicationPhotoIndex(r,p,i);return `<figure class="ih-photo-result ih-photo-result--passed"><div class="ih-photo-result-image"><a href="${base}/public/${id}/photos/${p.id}" target="_blank" rel="noopener"><img src="${base}/public/${id}/photos/${p.id}" alt="LockX verified photo ${index+1}" loading="lazy"></a>${photoStatusBadge(photoState(null,true))}</div><figcaption>Photo ${index+1} · Verified match</figcaption></figure>`;}).join('')}</div>${notice(r.scope)}<p>A marking alone is not proof. Confirm that you are viewing the genuine LockX website. This is a historical capture record; it does not track who holds the item today.</p></article>`);
+      const recordingLocation=r.location?.source==='device_reported'&&r.location.city&&r.location.state?`${r.location.city}, ${r.location.state}`:'';
+      shell(`<article class="ih-standalone-content"><span class="ih-public-status">✓ LockX verification record</span><h1>${esc(r.title)}</h1><p>${partial?`These ${verified} approved photos are from a check of ${total} selected photos. ${total-verified===1?'The remaining photo is unverified and is not published here.':`The remaining ${total-verified} photos are unverified and are not published here.`}`:`These exact ${verified} photos were compared with a newly recorded item video.`} Check that the listing shows the same photos and identifying details.</p><div class="ih-public-facts"><div><span>CAPTURED</span><strong>${esc(date(r.captured))}</strong></div>${recordingLocation?`<div><span>RECORDING LOCATION</span><strong>${esc(recordingLocation)}</strong><br><small>Device-reported location</small></div>`:''}<div><span>RECORD ID</span><strong>${esc(r.id)}</strong></div><div><span>PHOTO MATCH</span><strong>${verified} of ${total} selected photos verified</strong></div><div><span>VERIFICATION SCOPE</span><strong>Visual photo-to-item correspondence</strong></div></div><div class="ih-public-gallery">${r.photos.map((p,i)=>{const index=publicationPhotoIndex(r,p,i);return `<figure class="ih-photo-result ih-photo-result--passed"><div class="ih-photo-result-image"><a href="${base}/public/${id}/photos/${p.id}" target="_blank" rel="noopener"><img src="${base}/public/${id}/photos/${p.id}" alt="LockX verified photo ${index+1}" loading="lazy"></a>${photoStatusBadge(photoState(null,true))}</div><figcaption>Photo ${index+1} · Verified match</figcaption></figure>`;}).join('')}</div>${notice(r.scope)}<p>A marking alone is not proof. Confirm that you are viewing the genuine LockX website. This is a historical capture record; it does not track who holds the item today.</p></article>`);
     }catch(error){if(route===routeNumber)shell(`<div class="ih-standalone-content"><h1>Record not confirmed.</h1>${notice(error.message,'error')}<p>Do not rely on a photo marking without a matching LockX record.</p></div>`);}
   }
   function hasLocalCaptureConsent(record=sellerData){return !!record&&((record===sellerData&&retryConsentToken===sellerToken)||(!!record.auto_publish&&secretPattern.test(browserAccess.records[record.id]||'')));}
@@ -339,7 +340,7 @@
       if(!['waiting','capturing'].includes(r.status)){showSellerResult(token,route);return;}
       const qualityRetry=['low_light','motion_blur'].includes(r.capture_retry_reason);retryLightToken=qualityRetry?token:null;
       const localConsent=hasLocalCaptureConsent(r);
-      shell(`<div class="ih-standalone-content ih-camera-intro"><span class="ih-kicker">10-second video · No app or login</span><h1>Show the item.<br>Get verified photos.</h1><p>In one 10-second video, slowly show the views in your photos. Bring printed numbers and markings close enough to read.</p>${qualityRetry?notice('Retrying the same photos. On supported phones, light on for 5 seconds, then off for 5 seconds. Hold steady; turn the light off if it causes glare.'):''}<div class="ih-seller-refs">${r.media.map((m,i)=>`<figure><img src="${base}/seller/${token}/photos/${m.id}" alt="Reference photo ${i+1}"><figcaption>Photo ${i+1}</figcaption></figure>`).join('')}</div>${notice(r.capture_mode==='stationary'?'Move your phone around the item. Do not lift or move a heavy appliance.':r.capture_mode==='digital'?'Use a second screen and hide usable barcodes. This check cannot establish ticket validity or transfer rights.':'Keep the same item in view, in good light. Show its front, back, sides, and photographed details. No microphone is used.')}<details class="ih-result-details ih-capture-options"><summary>Voice instructions</summary><label class="ih-voice-option"><input type="checkbox" id="ihVoiceConsent" ${voiceEnabled()?'checked':''}><span>Read instructions aloud <small>Optional · instructions are always shown on screen</small></span></label></details>${localConsent?'<p class="ih-capture-consent-note">Your permission is saved. Keep faces and private information out of the recording.</p>':'<label class="ih-seller-consent"><input type="checkbox" id="ihSellerConsent"><span>I have permission to show this item and consent to recording and comparison with these photos. I will keep faces and private information out of view.</span></label>'}<div id="ihCaptureError" class="ih-note error" hidden></div><button class="ih-button ih-wide" id="ihStartCapture">Record 10-second video →</button><p class="ih-scan-target">Recording stops automatically. ${r.auto_publish?'Photos that pass verification appear here with QR codes automatically, even if another photo does not match.':'Results appear here when comparison finishes.'} Unclear photos stay unverified.</p></div>`);
+      shell(`<div class="ih-standalone-content ih-camera-intro"><span class="ih-kicker">10-second video · No app or login</span><h1>Show the item.<br>Get verified photos.</h1><p>In one 10-second video, slowly show the views in your photos. Bring printed numbers and markings close enough to read.</p>${qualityRetry?notice('Retrying the same photos. On supported phones, light on for 5 seconds, then off for 5 seconds. Hold steady; turn the light off if it causes glare.'):''}<div class="ih-seller-refs">${r.media.map((m,i)=>`<figure><img src="${base}/seller/${token}/photos/${m.id}" alt="Reference photo ${i+1}"><figcaption>Photo ${i+1}</figcaption></figure>`).join('')}</div>${notice(r.capture_mode==='stationary'?'Move your phone around the item. Do not lift or move a heavy appliance.':r.capture_mode==='digital'?'Use a second screen and hide usable barcodes. This check cannot establish ticket validity or transfer rights.':'Keep the same item in view, in good light. Show its front, back, sides, and photographed details. No microphone is used.')}<details class="ih-result-details ih-capture-options"><summary>Voice instructions</summary><label class="ih-voice-option"><input type="checkbox" id="ihVoiceConsent" ${voiceEnabled()?'checked':''}><span>Read instructions aloud <small>Optional · instructions are always shown on screen</small></span></label></details>${localConsent?'<p class="ih-capture-consent-note">Your permission is saved. Keep faces and private information out of the recording.</p>':'<label class="ih-seller-consent"><input type="checkbox" id="ihSellerConsent"><span>I have permission to show this item and consent to recording and comparison with these photos. I will keep faces and private information out of view.</span></label>'}<p class="ih-capture-consent-note">Allow location to add the recording city and state to verified photos.</p><div id="ihCaptureError" class="ih-note error" hidden></div><button class="ih-button ih-wide" id="ihStartCapture">Record 10-second video →</button><p class="ih-scan-target">Recording stops automatically. ${r.auto_publish?'Photos that pass verification appear here with QR codes automatically, even if another photo does not match.':'Results appear here when comparison finishes.'} Unclear photos stay unverified.</p></div>`);
       $('#ihStartCapture').onclick=startCapture;
       if(!('speechSynthesis' in window))$('#ihVoiceConsent').closest('details').hidden=true;
       if(window.LOCKX_LOCAL_PREVIEW)$('#ihCaptureError').insertAdjacentHTML('beforebegin',notice('Local preview: automated comparison is disabled. Captures made here cannot earn a verified marking.','warning'));
@@ -418,9 +419,57 @@
   function speak(current,text){if(!current?.voice||!window.speechSynthesis||current.cancelled)return;try{speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.rate=.95;speechSynthesis.speak(utterance);}catch{}}
   function activeCapture(current){return !!current&&capture===current&&!current.cancelled&&current.route===routeNumber;}
   function stopQualityLoop(current){clearTimeout(current.frameTimer);if(current.frameCallback!==undefined)try{current.video?.cancelVideoFrameCallback(current.frameCallback);}catch{}current.frameCallback=undefined;}
+  function cancelPendingCaptureStart(){
+    captureStartNumber++;
+    const button=$('#ihStartCapture');if(button?.disabled){button.disabled=false;button.textContent='Record 10-second video →';}
+  }
+  async function prepareCaptureLocation(route){
+    const start=captureStartNumber,current=()=>route===routeNumber&&start===captureStartNumber&&!document.hidden;
+    if(!current()||!navigator.geolocation?.getCurrentPosition)return false;
+    try{
+      const permission=await navigator.permissions?.query({name:'geolocation'});
+      if(!current())return false;
+      if(permission?.state==='granted')return true;
+      if(permission?.state==='denied')return false;
+    }catch{} // Some Safari versions do not expose geolocation permission state.
+    if(!current())return false;
+    // Resolve the native Allow/Deny prompt before the timed clip. Its timeout
+    // starts after the permission decision; never start recording behind it.
+    return new Promise(resolve=>{
+      const finish=allowed=>resolve(current()&&allowed);
+      try{navigator.geolocation.getCurrentPosition(()=>finish(true),error=>finish(error?.code!==1),{enableHighAccuracy:false,maximumAge:0,timeout:2500});}
+      catch{finish(false);}
+    });
+  }
+  function stopCaptureLocation(current){
+    if(!current)return;
+    current.locationClosed=true;clearTimeout(current.locationDeadline);clearTimeout(current.locationTimer);
+    current.locationRequest?.abort();current.locationRequest=null;
+  }
+  function requestCaptureLocation(current){
+    // One optional fresh device reading. Never await location or extend the fixed video timer.
+    if(!activeCapture(current)||current.finishing||!current.sessionID||!current.locationAllowed||current.locationRequested||!navigator.geolocation?.getCurrentPosition)return;
+    current.locationRequested=true;current.locationClosed=false;
+    current.locationDeadline=setTimeout(()=>stopCaptureLocation(current),5500);
+    try{
+      navigator.geolocation.getCurrentPosition(position=>{
+        if(current.locationClosed||!activeCapture(current)||current.finishing)return;
+        clearTimeout(current.locationDeadline);current.locationClosed=true;
+        const {latitude,longitude,accuracy}=position.coords||{},timestamp=position.timestamp;
+        if(![latitude,longitude,accuracy,timestamp].every(Number.isFinite)||accuracy<0)return;
+        const controller=new AbortController();current.locationRequest=controller;
+        current.locationTimer=setTimeout(()=>controller.abort(),3500);
+        api('/seller/'+encodeURIComponent(current.token)+'/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:current.sessionID,latitude,longitude,accuracy,timestamp}),signal:controller.signal})
+          .catch(()=>{}) // Permission, lookup, and network failures leave location off.
+          .finally(()=>{clearTimeout(current.locationTimer);if(current.locationRequest===controller)current.locationRequest=null;});
+      },()=>stopCaptureLocation(current),{enableHighAccuracy:true,maximumAge:0,timeout:4500});
+    }catch{stopCaptureLocation(current);}
+  }
   function stopCapture(discard = true) {
+    cancelPendingCaptureStart();
     const current=capture;if(!current)return;
     if(discard)current.cancelled=true;
+    stopCaptureLocation(current);
     clearInterval(current.timer);clearTimeout(current.limit);clearTimeout(current.retryTimer);clearTimeout(current.progressTimer);clearTimeout(current.startTimer);clearTimeout(current.finalizeTimer);clearTimeout(current.playTimer);stopQualityLoop(current);
     current.startRequest?.abort();current.progressRequest?.abort();current.upload?.abort();
     current.intentionalStop=true;current.lightCycle?.finish();
@@ -432,18 +481,22 @@
     if(discard){current.queue=[];current.sampleCanvas=null;current.previousFrame=null;capture=null;}
   }
   async function startCapture() {
+    if(document.hidden)return;
     if(!hasLocalCaptureConsent()&&!$('#ihSellerConsent')?.checked){errorAt('#ihCaptureError',Error('Please agree to the recording before starting.'));return;}
     const button=$('#ihStartCapture');button.disabled=true;button.textContent='Opening camera…';
     const voice=!!$('#ihVoiceConsent')?.checked;try{localStorage.setItem('lockx-scan-voice',voice?'on':'off');}catch{}
-    let current=null;const route=routeNumber;
+    let current=null;const route=routeNumber,start=++captureStartNumber;
+    const currentStart=()=>start===captureStartNumber&&route===routeNumber&&!document.hidden&&isStandalone&&location.hash.includes('/capture/');
     try {
       if(typeof window.LockXCapture?.stopRecorder!=='function')throw Error('The camera update has not loaded. Reload this page, then try again.');
       if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Error('Open this link over HTTPS in Safari or Chrome to use the camera.');
       if(!window.MediaRecorder)throw Error('This browser cannot record the item. Open the link in Safari or Chrome.');
+      const locationAllowed=await prepareCaptureLocation(route);
+      if(!currentStart())return;
       const portrait=window.innerHeight>=window.innerWidth;
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:portrait?720:1280,max:1280},height:{ideal:portrait?960:720,max:1280},aspectRatio:{ideal:portrait ? .75 : 16/9},frameRate:{ideal:20,max:24}},audio:false});
-      if(route!==routeNumber||!isStandalone||!location.hash.includes('/capture/')){stream.getTracks().forEach(t=>t.stop());return;}
-      current={stream,queue:[],nextSequence:0,uploadedCount:0,bytesTotal:0,uploadedBytes:0,cancelled:false,intentionalStop:false,route,voice};capture=current;
+      if(!currentStart()){stream.getTracks().forEach(t=>t.stop());return;}
+      current={stream,queue:[],nextSequence:0,uploadedCount:0,bytesTotal:0,uploadedBytes:0,cancelled:false,intentionalStop:false,route,voice,token:sellerToken,locationAllowed};capture=current;
       const mime=['video/mp4','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));
       const recorder=new MediaRecorder(stream,{...(mime?{mimeType:mime}:{}),videoBitsPerSecond:1_200_000});current.recorder=recorder;
       recorder.ondataavailable=e=>enqueueChunks(current,e.data);
@@ -455,7 +508,7 @@
       const sessionReady=api('/seller/'+sellerToken+'/video/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',signal:controller.signal}).then(response=>response.json());
       const previewReady=Promise.race([current.video.play(),new Promise((_,reject)=>{current.playTimer=setTimeout(()=>reject(Error('The camera preview did not open. Please reopen this link in Safari or Chrome.')),8000);})]);
       const [session]=await Promise.all([sessionReady,previewReady]);clearTimeout(current.playTimer);clearTimeout(current.startTimer);
-      if(!activeCapture(current))return;
+      if(!activeCapture(current)||!currentStart()){if(activeCapture(current))captureFailed('Camera startup paused. Keep this page open and try again.');return;}
       current.layoutHandler=()=>positionReticle(current);window.addEventListener('resize',current.layoutHandler);window.visualViewport?.addEventListener('resize',current.layoutHandler);
       if(window.ResizeObserver){current.layoutObserver=new ResizeObserver(current.layoutHandler);current.layoutObserver.observe(current.video);current.layoutObserver.observe($('.ih-scan-bottom'));}
       if(!activeCapture(current))return;
@@ -468,7 +521,7 @@
         }});
         const off=$('#ihLightOff');if(off){off.hidden=!current.lightCycle.supported;off.onclick=()=>current.lightCycle?.disable();}
       }else if($('#ihLightStatus'))$('#ihLightStatus').textContent='Normal camera light';
-      current.recordingStarted=performance.now();current.wallStarted=Date.now();recorder.start(1000);current.lightCycle?.start();
+      current.recordingStarted=performance.now();current.wallStarted=Date.now();recorder.start(1000);current.lightCycle?.start();requestCaptureLocation(current);
       $('#ihRecorderState').textContent='REC';$('#ihInstructionTitle').textContent='Show the views in your photos.';$('#ihInstruction').textContent=session.stage.instruction;
       $('.ih-auto-camera').dataset.kind='motion';positionReticle(current);
       speak(current,'Recording for ten seconds. Slowly show the item from the views in your photos.');
@@ -487,7 +540,7 @@
       pulse();pumpChunks(current);
     }catch(error){
       clearTimeout(current?.playTimer);clearTimeout(current?.startTimer);
-      if(current?.cancelled||route!==routeNumber)return;
+      if(current?.cancelled||!currentStart())return;
       const message=error.name==='NotAllowedError'?'Allow camera access in your browser settings, then try again.':error.name==='NotFoundError'?'No camera was found. Open this link on your phone.':error.name==='NotReadableError'?'The camera is busy. Close other camera apps and try again.':error.name==='AbortError'?'The connection could not start recording. Reconnect and try again.':error.message;
       if($('#ihCaptureError')){stopCapture();errorAt('#ihCaptureError',Error(message));button.disabled=false;button.textContent='Try camera again →';}else captureFailed(message);
     }
@@ -562,7 +615,7 @@
   }
   async function finishCapture(current) {
     if(!activeCapture(current)||current.finishing)return;
-    current.finishing=true;current.intentionalStop=true;current.lightCycle?.finish();current.recordingSeconds=(performance.now()-current.recordingStarted)/1000;
+    current.finishing=true;stopCaptureLocation(current);current.intentionalStop=true;current.lightCycle?.finish();current.recordingSeconds=(performance.now()-current.recordingStarted)/1000;
     clearInterval(current.timer);clearTimeout(current.limit);stopQualityLoop(current);
     try{speechSynthesis.cancel();}catch{}
     // The stop helper shuts camera tracks immediately and bounds Safari's final stop event.
@@ -608,7 +661,7 @@
   window.addEventListener('pagehide',()=>{if(photoPreparation)photoPreparation.cancelled=true;clearTimeout(poll);sellerResultNumber++;sellerResultRequest?.abort();sellerResultRequest=null;closeSellerEvents();stopCapture();clearMarkedFiles();});
   window.addEventListener('pageshow',event=>{if(event.persisted)route();});
   window.addEventListener('beforeunload',e=>{if(capture?.recorder?.state==='recording'||capture?.finishing){e.preventDefault();e.returnValue='';}});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden && capture?.recorder?.state==='recording')captureFailed('The recording paused when this page left the screen. Keep the camera page open for the next attempt.');});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelPendingCaptureStart();if(capture?.recorder?.state==='recording')captureFailed('The recording paused when this page left the screen. Keep the camera page open for the next attempt.');else if(capture&&!capture.finishing)captureFailed('Camera startup paused when this page left the screen. Keep this page open and try again.');}});
   api('/capabilities').then(r=>r.json()).then(r=>{capabilities=r;serviceState();}).catch(()=>{});
   route();
 })();

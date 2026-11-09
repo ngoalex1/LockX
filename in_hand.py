@@ -21,6 +21,8 @@ from pathlib import Path
 from threading import BoundedSemaphore, Lock
 from time import perf_counter
 from typing import Literal
+from urllib.parse import urlencode
+from urllib.request import Request as URLRequest, urlopen
 from uuid import uuid4
 
 import cv2
@@ -46,6 +48,9 @@ _reference_cache, _qr_cache = OrderedDict(), OrderedDict()
 _reference_lock, _qr_lock = Lock(), Lock()
 _stream_lock, _active_streams = Lock(), {}
 RESULT_STREAM_MAX_ACTIVE, RESULT_STREAM_MAX_PER_REQUEST = 32, 2
+_location_slots = BoundedSemaphore(4)
+LOCATION_LOOKUP_SECONDS = 2.5
+LOCATION_SOURCE = "device_reported"
 
 
 @contextmanager
@@ -100,6 +105,13 @@ def database(*, read_only=False):
       CREATE TABLE IF NOT EXISTS ih_publication_jobs (
         request_id TEXT PRIMARY KEY REFERENCES ih_requests(id),
         state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, updated REAL NOT NULL);
+      CREATE TABLE IF NOT EXISTS ih_session_locations (
+        session_id TEXT PRIMARY KEY REFERENCES ih_sessions(id), city TEXT NOT NULL,
+        state TEXT NOT NULL, country_code TEXT NOT NULL, source TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ih_publication_locations (
+        publication_id TEXT PRIMARY KEY REFERENCES ih_publications(id),
+        session_id TEXT NOT NULL REFERENCES ih_sessions(id), city TEXT NOT NULL,
+        state TEXT NOT NULL, country_code TEXT NOT NULL, source TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS ih_live_checks (
         session_id TEXT NOT NULL REFERENCES ih_sessions(id), stage_id TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session_id,stage_id));
@@ -162,6 +174,16 @@ class Capture(BaseModel):
     session_id: str
     consent: Literal[True]
     source: Literal["browser_camera"] = "browser_camera"
+
+
+class RecordingLocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=10, max_length=100)
+    latitude: float = Field(ge=-90, le=90, allow_inf_nan=False, strict=True)
+    longitude: float = Field(ge=-180, le=180, allow_inf_nan=False, strict=True)
+    accuracy: float = Field(ge=0, le=10000, allow_inf_nan=False, strict=True)
+    # GeolocationPosition.timestamp uses epoch milliseconds, not EXIF time.
+    timestamp: float = Field(ge=0, allow_inf_nan=False, strict=True)
 
 
 class ScanProgress(Progress):
@@ -314,6 +336,83 @@ def available(row):
         raise HTTPException(410, "This inspection link has expired. Ask the requester for a new one.")
 
 
+def clean_recording_location(location):
+    """Only coarse display fields may cross the persistence/public boundary."""
+    if not isinstance(location, dict) or location.get("source") != LOCATION_SOURCE:
+        return None
+    values = {}
+    for key in ("city", "state"):
+        value = location.get(key)
+        if (not isinstance(value, str) or not value.strip() or len(value.strip()) > 80
+                or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+            return None
+        values[key] = value.strip()
+    if location.get("country_code") != "US":
+        return None
+    return {**values, "country_code":"US", "source":LOCATION_SOURCE}
+
+
+def session_location(db, row):
+    if not row["session_id"]:
+        return None
+    location = db.execute("""SELECT l.city,l.state,l.country_code,l.source
+        FROM ih_session_locations l JOIN ih_sessions s ON s.id=l.session_id
+        WHERE l.session_id=? AND s.request_id=?""",(row["session_id"],row["id"])).fetchone()
+    return clean_recording_location(dict(location)) if location else None
+
+
+def published_location(db, publication_id):
+    location = db.execute("SELECT city,state,country_code,source FROM ih_publication_locations WHERE publication_id=?",
+                          (publication_id,)).fetchone()
+    return clean_recording_location(dict(location)) if location else None
+
+
+def resolve_video_location(latitude, longitude):
+    """US city/state only; coordinates are transient and never logged or cached."""
+    if not _location_slots.acquire(blocking=False):
+        return None
+    try:
+        params = {"x":round(longitude,3), "y":round(latitude,3), "benchmark":"Public_AR_Current",
+                  "vintage":"Current_Current", "layers":"States,Incorporated Places,Census Designated Places", "format":"json"}
+        request = URLRequest("https://geocoding.geo.census.gov/geocoder/geographies/coordinates?"+urlencode(params),
+                             headers={"Accept":"application/json","User-Agent":"LockX/1.0 (https://lockx.ai)"})
+        # urllib avoids HTTP client's INFO request-URL logs containing coordinates.
+        # The caller also bounds the complete lookup to 2.5 seconds. A timed-out
+        # worker keeps its slot until it exits, preventing unbounded background work.
+        with urlopen(request,timeout=2) as response:
+            content = response.read(262145)
+        if len(content) > 262144:
+            return None
+        geographies = json.loads(content).get("result",{}).get("geographies",{})
+        states = geographies.get("States") or []
+        for state in states:
+            state_code, abbreviation = state.get("STATE"), state.get("STUSAB")
+            if not state_code or not isinstance(abbreviation,str) or not re.fullmatch(r"[A-Z]{2}",abbreviation):
+                continue
+            for group in ("Incorporated Places","Census Designated Places"):
+                for place in geographies.get(group) or []:
+                    if place.get("STATE") != state_code or not place.get("BASENAME"):
+                        continue
+                    return clean_recording_location({"city":place["BASENAME"], "state":abbreviation,
+                                                      "country_code":"US", "source":LOCATION_SOURCE})
+        # Never substitute a county for a city or invent a place outside coverage.
+        return None
+    except Exception:
+        # Provider exceptions/URLs can contain coordinates; do not serialize them.
+        return None
+    finally:
+        _location_slots.release()
+
+
+def location_capture_active(db, row, session_id):
+    session = db.execute("SELECT * FROM ih_sessions WHERE id=? AND request_id=?",(session_id,row["id"])).fetchone()
+    if (not session or row["session_id"] != session_id or row["status"] != "capturing" or session["finished"] is not None
+            or row["expires"] <= time.time() or time.time()-session["started"] > 30
+            or db.execute("SELECT 1 FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()):
+        return None
+    return session
+
+
 def view(db, row, private=False):
     listing = json.loads(row["listing"])
     media = [dict(m) for m in db.execute("SELECT id,role,mime,sha256,seconds,label FROM ih_media WHERE request_id=? ORDER BY rowid", (row["id"],))]
@@ -323,6 +422,8 @@ def view(db, row, private=False):
     retry = db.execute("SELECT reason FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()
     if retry:
         result["capture_retry_reason"] = retry["reason"]
+    if location := session_location(db,row):
+        result["location"] = location
     if private:
         result.update(token=row["token"], analysis_status=row["analysis_status"], analysis=json.loads(row["analysis"] or "null"),
                       events=[dict(e) for e in db.execute("SELECT name,created FROM ih_events WHERE request_id=? ORDER BY rowid", (row["id"],))])
@@ -1183,11 +1284,12 @@ def qr_image(link, box_size, mask):
         return _qr_cache[key].copy()
 
 
-def marked_photo(content, publication_id, captured):
+def marked_photo(content, publication_id, captured, *, location=None):
     """Link to the canonical record without covering identifying item details."""
     link = publication_link(publication_id)
     picture = Image.open(io.BytesIO(content)).convert("RGB")
     large, small = ImageFont.load_default(size=28), ImageFont.load_default(size=20)
+    location = clean_recording_location(location)
     date = time.strftime("%b %d, %Y %H:%M UTC", time.gmtime(captured))
     # Validate the actual exported JPEG, including the surrounding photograph.
     # A valid QR matrix alone is insufficient: its mask can interact with nearby
@@ -1201,14 +1303,36 @@ def marked_photo(content, publication_id, captured):
             width = max(800, picture.width, qr.width+580)
             height = round(picture.height * width / picture.width)
             footer = max(250,qr.height+40)
+            location_lines = []
+            if location:
+                # Keep even a long city/state clear of the QR and the product.
+                text = "Video location: " + location["city"] + ", " + location["state"]
+                available_width = width-qr.width-68
+                line = ""
+                for char in text:
+                    if line and small.getlength(line+char) > available_width:
+                        location_lines.append(line.rstrip())
+                        line = char.lstrip()
+                    else:
+                        line += char
+                if line:
+                    location_lines.append(line)
+                footer = max(footer,250+26*len(location_lines))
             canvas = Image.new("RGB", (width, height + footer), "#163d34")
             canvas.paste(picture.resize((width,height)), (0,0))
             canvas.paste(qr, (width-qr.width-20,height+(footer-qr.height)//2))
             draw = ImageDraw.Draw(canvas)
             draw.text((24, height + 28), "LockX In-hand verified", font=large, fill="white")
             draw.text((24, height + 80), "Photo match observed · " + date, font=small, fill="#d4e7df")
-            draw.text((24, height + 119), "ID: " + publication_id, font=small, fill="#d4e7df")
-            draw.text((24, height + 157), "Scan to confirm the photo set at LockX", font=small, fill="#d4e7df")
+            offset = 119
+            for line in location_lines:
+                draw.text((24,height+offset),line,font=small,fill="#d4e7df")
+                offset += 26
+            if location:
+                draw.text((24,height+offset),"Device-reported location",font=small,fill="#d4e7df")
+                offset += 31
+            draw.text((24, height + offset), "ID: " + publication_id, font=small, fill="#d4e7df")
+            draw.text((24, height + offset + 38), "Scan to confirm the photo set at LockX", font=small, fill="#d4e7df")
             output = io.BytesIO()
             canvas.save(output, "JPEG", quality=92)
             exported = output.getvalue()
@@ -1219,12 +1343,14 @@ def marked_photo(content, publication_id, captured):
     raise ValueError("The exported QR image could not be read reliably")
 
 
-def submit_export(content, publication_id, captured, *, speculative=False):
+def submit_export(content, publication_id, captured, *, speculative=False, location=None):
     """Bound both running CPU work and queued image buffers across requests."""
     if not _export_slots.acquire(blocking=not speculative):
         return None
     try:
-        future = _export_workers.submit(marked_photo,content,publication_id,captured)
+        # Keep legacy three-argument renderers working for unlocated records.
+        options = {"location":location} if location else {}
+        future = _export_workers.submit(marked_photo,content,publication_id,captured,**options)
     except Exception:
         _export_slots.release()
         raise
@@ -1234,9 +1360,10 @@ def submit_export(content, publication_id, captured, *, speculative=False):
 
 class ExportPreparation:
     """Private, bounded preparation. No publication/media row exists yet."""
-    def __init__(self, row, refs, captured):
+    def __init__(self, row, refs, captured, *, location=None):
         self.request_id, self.session_id = row["id"], row["session_id"]
         self.captured, self.publication_id = captured, secrets.token_hex(8)
+        self.location = clean_recording_location(location)
         self.references = [(r["id"],hashlib.sha256(r["content"]).hexdigest()) for r in refs]
         self.futures, self.lock = {}, Lock()
         self.released, self.closed = False, False
@@ -1244,7 +1371,8 @@ class ExportPreparation:
 
     def matches(self, snapshot):
         return (self.request_id == snapshot["request_id"] and self.session_id == snapshot["session_id"]
-                and self.captured == snapshot["captured"] and self.references == snapshot["references"])
+                and self.captured == snapshot["captured"] and self.references == snapshot["references"]
+                and self.location == snapshot.get("location"))
 
     def rendered(self, indices):
         # Finish/cancel a complete attempt before a possible retry. Failures on
@@ -1274,9 +1402,12 @@ def prepare_exports(row, refs, session):
         return None
     preparation = None
     try:
-        preparation = ExportPreparation(row,refs,session["finished"])
+        with database(read_only=True) as db:
+            location = session_location(db,row)
+        preparation = ExportPreparation(row,refs,session["finished"],location=location)
         for i, reference in enumerate(refs):
-            future = submit_export(reference["content"],preparation.publication_id,preparation.captured,speculative=True)
+            future = submit_export(reference["content"],preparation.publication_id,preparation.captured,
+                                   speculative=True,location=preparation.location)
             if future is None:
                 preparation.close()
                 return None
@@ -1360,8 +1491,10 @@ def publication_manifest(db, row, publication, eligibility=None):
         indices = [m["photo_index"] for m in photos]
         if not photos or len(photos) != total or indices != eligibility["eligible_photo_indices"]:
             return None
+    location = published_location(db,publication["id"])
     return {"id":publication["id"],"created":publication["created"],"photos":photos,
-            "eligible_photo_indices":indices,"verified_count":len(photos),"total_count":total,"partial":len(photos)<total}
+            "eligible_photo_indices":indices,"verified_count":len(photos),"total_count":total,"partial":len(photos)<total,
+            **({"location":location} if location else {})}
 
 
 def publication_snapshot(db, row):
@@ -1374,9 +1507,11 @@ def publication_snapshot(db, row):
     references = [(r["id"],hashlib.sha256(r["content"]).hexdigest()) for r in refs]
     evidence = [tuple(m) for m in db.execute("SELECT id,role,sha256,seconds,label FROM ih_media WHERE request_id=? AND role IN ('listing','video','frame') ORDER BY rowid",(row["id"],))]
     state = {key:row[key] for key in ("id","owner_id","session_id","listing","analysis","analysis_status","status")}
-    fingerprint = hashlib.sha256(json.dumps([state,dict(session),references,evidence,eligibility],sort_keys=True).encode()).hexdigest()
+    location = session_location(db,row)
+    fingerprint = hashlib.sha256(json.dumps([state,dict(session),references,evidence,eligibility,location],sort_keys=True).encode()).hexdigest()
     return {"request_id":row["id"],"session_id":row["session_id"],"captured":session["finished"],
-            "references":references,"contents":[r["content"] for r in refs],"eligibility":eligibility,"fingerprint":fingerprint}
+            "references":references,"contents":[r["content"] for r in refs],"eligibility":eligibility,"fingerprint":fingerprint,
+            "location":location}
 
 
 def existing_publication(db, row, eligibility):
@@ -1397,7 +1532,7 @@ def render_publication(snapshot, preparation=None):
     publication_id, futures = secrets.token_hex(8), {}
     try:
         for i in indices:
-            futures[i] = submit_export(snapshot["contents"][i],publication_id,snapshot["captured"])
+            futures[i] = submit_export(snapshot["contents"][i],publication_id,snapshot["captured"],location=snapshot.get("location"))
         wait(list(futures.values()))
         return publication_id, {i:future.result() for i,future in futures.items()}
     finally:
@@ -1433,6 +1568,10 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False):
     eligibility = current["eligibility"]
     db.execute("INSERT INTO ih_publications VALUES (?,?,?,NULL)",(publication_id,row["id"],time.time()))
     db.execute("INSERT INTO ih_publication_scopes VALUES (?,?)",(publication_id,eligibility["total_count"]))
+    if current["location"]:
+        location = current["location"]
+        db.execute("INSERT INTO ih_publication_locations VALUES (?,?,?,?,?,?)",
+                   (publication_id,current["session_id"],location["city"],location["state"],location["country_code"],location["source"]))
     # The stored original index never collapses after a failed middle photo.
     # Originals, video and rejected references remain capability-protected.
     for i in eligibility["eligible_photo_indices"]:
@@ -1582,6 +1721,7 @@ def seller_result_payload(db, row):
             "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
             **({"identifier_checks":identifiers} if identifiers else {}),
             **eligibility,**seller_publication(db,row),
+            **({"location":location} if (location := session_location(db,row)) else {}),
             **({"capture_retry_reason":reason} if (reason := capture_retry_reason(db,row)) else {}),
             "scope":SCOPE}
 
@@ -1595,7 +1735,8 @@ def seller_event_state(token, previous=None):
         job = db.execute("SELECT state,attempts,updated FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
         mappings = [tuple(m) for m in db.execute("SELECT p.photo_index,p.media_id,m.sha256 FROM ih_publication_photos p JOIN ih_publications v ON v.id=p.publication_id JOIN ih_media m ON m.id=p.media_id WHERE v.request_id=? ORDER BY p.photo_index",(row["id"],))]
         revision = hashlib.sha256(json.dumps([status(row),row["analysis_status"],row["analysis"],row["listing"],
-            row["session_id"],dict(publication) if publication else None,dict(job) if job else None,mappings],sort_keys=True).encode()).hexdigest()
+            row["session_id"],dict(publication) if publication else None,dict(job) if job else None,mappings,
+            session_location(db,row)],sort_keys=True).encode()).hexdigest()
         if previous and previous["revision"] == revision:
             return previous
         result = seller_result_payload(db,row)
@@ -1751,6 +1892,7 @@ def create_router(authenticate):
             capture_time = db.execute("SELECT finished FROM ih_sessions WHERE id=?",(row["session_id"],)).fetchone()[0]
             return {"id":publication_id,"status":"verified","title":json.loads(row["listing"])["title"],"captured":capture_time,"published":pub["created"],
                     "photo_count":manifest["verified_count"],"photos":manifest["photos"],
+                    **({"location":manifest["location"]} if manifest.get("location") else {}),
                     **{k:manifest[k] for k in ("eligible_photo_indices","verified_count","total_count","partial")},"scope":SCOPE}
 
     @router.get("/public/{publication_id}/photos/{media_id}")
@@ -1970,6 +2112,55 @@ def create_router(authenticate):
             sess = db.execute("SELECT * FROM ih_sessions WHERE id=?",(sid,)).fetchone()
             meta = db.execute("SELECT * FROM ih_scan_sessions WHERE session_id=?",(sid,)).fetchone()
             return {**scan_stage_view(sess,meta),"recording_seconds":10}
+
+    @router.post("/seller/{token}/location",openapi_extra={"requestBody":{"required":True,"content":{
+        "application/json":{"schema":RecordingLocation.model_json_schema()}}}})
+    async def recording_location(token: str, request: Request):
+        # This optional parallel request cannot delay recording/verification.
+        # The precise device fix is used transiently to resolve a coarse place.
+        body = bytearray()
+        async for part in request.stream():
+            body.extend(part)
+            if len(body) > 2048:
+                raise HTTPException(413,"Keep the location request under 2 KB")
+        try:
+            data = RecordingLocation.model_validate_json(bytes(body))
+        except ValidationError:
+            # Do not echo precise inputs. This also keeps nonstandard JSON
+            # NaN/Infinity out of the framework's JSON validation-error encoder.
+            raise HTTPException(422,"Use a fresh, valid device location for the current recording") from None
+        with database() as db:
+            row = seller(db,token)
+            available(row)
+            session = location_capture_active(db,row,data.session_id)
+            if not session:
+                raise HTTPException(409,"Location can be added only during this active recording")
+            observed = data.timestamp/1000
+            now = time.time()
+            if observed < max(session["started"]-5,now-30) or observed > now+10:
+                raise HTTPException(422,"Request a fresh device location during the recording")
+            if location := session_location(db,row):
+                return {"status":"resolved","location":location}
+            limited("in-hand-location:"+data.session_id,2)
+        try:
+            location = await asyncio.wait_for(asyncio.to_thread(resolve_video_location,data.latitude,data.longitude),
+                                              timeout=LOCATION_LOOKUP_SECONDS)
+        except Exception:
+            # Do not log exception text, which may contain a provider URL/fix.
+            location = None
+        location = clean_recording_location(location)
+        if not location:
+            return {"status":"unavailable"}
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = seller(db,token)
+            if not location_capture_active(db,row,data.session_id):
+                return {"status":"ignored"}
+            # First resolved fix is immutable for this recording. A retry gets
+            # a new session, and a slow lookup can never label a later take.
+            db.execute("INSERT OR IGNORE INTO ih_session_locations VALUES (?,?,?,?,?)",
+                       (data.session_id,location["city"],location["state"],location["country_code"],location["source"]))
+            return {"status":"resolved","location":session_location(db,row)}
 
     @router.post("/seller/{token}/scan/progress")
     def scan_progress(token: str, data: ScanProgress, background: BackgroundTasks):

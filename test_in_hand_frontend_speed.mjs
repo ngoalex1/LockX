@@ -177,12 +177,12 @@ function captureHarness({serverReason,query=''}={}){
   const win={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:captureAPI,innerHeight:800,innerWidth:400,addEventListener(){},speechSynthesis:{}};
   const detail={id:'inspection',status:'waiting',capture_mode:'handheld',media:[],auto_publish:true,...(serverReason?{capture_retry_reason:serverReason}:{})};
   const context=vm.createContext({AbortController,JSON,Date,Promise,Error,encodeURIComponent,...timers,setInterval:()=>99,clearInterval(){},
-    performance:{now:()=>1000},window:win,MediaRecorder:Recorder,LockXCapture:captureAPI,
+    performance:{now:()=>1000},document:{hidden:false},window:win,MediaRecorder:Recorder,LockXCapture:captureAPI,
     navigator:{mediaDevices:{getUserMedia:async()=>stream}},location:{hash:'#in-hand/capture/token',search:query},
     localStorage:{setItem(){}},$:element,api:async path=>({json:async()=>path.endsWith('/video/start')?{session_id:'session',stage:{instruction:'Turn item'}}:detail}),
-    shell(){},notice:()=>'',esc:value=>String(value),voiceEnabled:()=>false,renderCamera(){},positionReticle(){},speak(){},pumpChunks(){},enqueueChunks(){},renderUploadStatus(){},updateCameraFeedback(){},
+    shell(){},notice:()=>'',esc:value=>String(value),voiceEnabled:()=>false,renderCamera(){},positionReticle(){},speak(){},pumpChunks(){},enqueueChunks(){},renderUploadStatus(){},updateCameraFeedback(){},requestCaptureLocation(){},prepareCaptureLocation:async()=>true,
     errorAt:(selector,error)=>calls.errors.push(error.message),stopCapture(){},captureFailed:message=>calls.errors.push(message),showSellerResult(){},finishCapture(){}});
-  vm.runInContext("let routeNumber=1,isStandalone=true,capture=null,sellerToken=null,sellerData=null,retryLightToken=null,retryConsentToken=null,autoStartRetryToken=null,browserAccess={records:{}};const secretPattern=/^[A-Za-z0-9_-]{43}$/,base='/api/v1/in-hand';"+
+  vm.runInContext("let captureStartNumber=0,routeNumber=1,isStandalone=true,capture=null,sellerToken=null,sellerData=null,retryLightToken=null,retryConsentToken=null,autoStartRetryToken=null,browserAccess={records:{}};const secretPattern=/^[A-Za-z0-9_-]{43}$/,base='/api/v1/in-hand';"+
     between('  function hasLocalCaptureConsent(','  function closeSellerEvents(){')+
     between('  function activeCapture(current){','  function stopQualityLoop(')+
     between('  async function startCapture() {','  function renderCamera(current)')+
