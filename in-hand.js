@@ -458,7 +458,7 @@
         const {latitude,longitude,accuracy}=position.coords||{},timestamp=position.timestamp;
         if(![latitude,longitude,accuracy,timestamp].every(Number.isFinite)||accuracy<0)return;
         const controller=new AbortController();current.locationRequest=controller;
-        current.locationTimer=setTimeout(()=>controller.abort(),3500);
+        current.locationTimer=setTimeout(()=>controller.abort(),4500);
         api('/seller/'+encodeURIComponent(current.token)+'/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:current.sessionID,latitude,longitude,accuracy,timestamp}),signal:controller.signal})
           .catch(()=>{}) // Permission, lookup, and network failures leave location off.
           .finally(()=>{clearTimeout(current.locationTimer);if(current.locationRequest===controller)current.locationRequest=null;});

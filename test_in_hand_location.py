@@ -361,7 +361,7 @@ def test_census_resolver_uses_actual_city_or_cdp_with_matching_state_not_raw_pro
     assert resolved == {**CITY, "city": city}
     assert_no_precise_location(resolved)
     url, timeout = calls[0]
-    assert urlparse(url).hostname == "geocoding.geo.census.gov" and timeout <= 2
+    assert urlparse(url).hostname == "geocoding.geo.census.gov" and timeout == 3.5
     query = parse_qs(urlparse(url).query)
     assert query["x"] == ["-122.419"] and query["y"] == ["37.775"]
     assert query["benchmark"] == ["Public_AR_Current"] and query["vintage"] == ["Current_Current"]

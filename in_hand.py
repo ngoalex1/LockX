@@ -49,7 +49,7 @@ _reference_lock, _qr_lock = Lock(), Lock()
 _stream_lock, _active_streams = Lock(), {}
 RESULT_STREAM_MAX_ACTIVE, RESULT_STREAM_MAX_PER_REQUEST = 32, 2
 _location_slots = BoundedSemaphore(4)
-LOCATION_LOOKUP_SECONDS = 2.5
+LOCATION_LOOKUP_SECONDS = 4
 LOCATION_SOURCE = "device_reported"
 
 
@@ -377,9 +377,9 @@ def resolve_video_location(latitude, longitude):
         request = URLRequest("https://geocoding.geo.census.gov/geocoder/geographies/coordinates?"+urlencode(params),
                              headers={"Accept":"application/json","User-Agent":"LockX/1.0 (https://lockx.ai)"})
         # urllib avoids HTTP client's INFO request-URL logs containing coordinates.
-        # The caller also bounds the complete lookup to 2.5 seconds. A timed-out
+        # The caller also bounds the complete lookup to four seconds. A timed-out
         # worker keeps its slot until it exits, preventing unbounded background work.
-        with urlopen(request,timeout=2) as response:
+        with urlopen(request,timeout=3.5) as response:
             content = response.read(262145)
         if len(content) > 262144:
             return None

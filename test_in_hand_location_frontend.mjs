@@ -65,7 +65,7 @@ test('acquisition and HTTP deadlines abandon optional location without extending
   const acquire=harness();acquire.context.request(acquire.current);acquire.runTimer(5500);acquire.calls[0].success(fresh());
   assert.equal(acquire.requests.length,0);assert.equal(acquire.timers.size,0);
   const http=harness({network:()=>new Promise(()=>{})});http.context.request(http.current);http.calls[0].success(fresh());
-  const signal=http.requests[0].options.signal;http.runTimer(3500);assert.equal(signal.aborted,true);
+  const signal=http.requests[0].options.signal;http.runTimer(4500);assert.equal(signal.aborted,true);
   assert.equal(http.current.cancelled,undefined);assert.equal(http.current.finishing,undefined);
 });
 
@@ -172,4 +172,18 @@ test('ordinary permission Allow and Deny still start the same fixed camera recor
     assert.equal(h.positions.length,allowed?2:1,'Only granted access requests a fresh fix during recording');
     h.context.stop();
   }
+});
+
+test('the fixed recording finish aborts a pending location lookup before saving or upload',async()=>{
+  const h=harness({network:()=>new Promise(()=>{})});h.context.request(h.current);h.calls[0].success(fresh());
+  const signal=h.requests[0].options.signal;let saved=0,uploaded=0;
+  h.current.recordingStarted=0;h.current.recorder={};h.current.stream={getTracks:()=>[]};
+  Object.assign(h.context,{performance:{now:()=>10000},sellerData:{media:[]},window:{removeEventListener(){}},
+    LockXCapture:{stopRecorder(){assert.equal(signal.aborted,true);saved++;return Promise.resolve();}},
+    clearInterval(){},stopQualityLoop(){},shell(){},$:()=>({}),uploadCapture:async()=>{uploaded++;},captureFailed:message=>assert.fail(message)});
+  h.context.document.body={classList:{remove(){}}};
+  const first=source.indexOf('  async function finishCapture(current) {'),next=source.indexOf('  async function uploadCapture(current) {',first);
+  assert.ok(first>=0&&next>first);vm.runInContext(source.slice(first,next)+'globalThis.finish=finishCapture;',h.context);
+  await h.context.finish(h.current);
+  assert.equal(signal.aborted,true);assert.equal(saved,1);assert.equal(uploaded,1);assert.equal(h.current.recordingSeconds,10);assert.equal(h.timers.size,0);
 });
