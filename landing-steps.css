@@ -1,53 +1,50 @@
-/* Three static steps in the approved Rose & Walnut palette. */
-body.lockx-public .lx-steps-fan{max-width:920px;margin:25px auto 0;padding:22px 12px 36px;scroll-margin-top:82px}
+/* Large, static artwork in the approved Rose & Walnut palette. */
+body.lockx-public .lx-steps-fan{max-width:1100px;margin:25px auto 0;padding:22px 12px 42px;scroll-margin-top:82px}
 .lx-steps-fan ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;list-style:none;padding:0;margin:0;isolation:isolate}
-.lx-fan-card{position:relative;display:grid;grid-template-rows:auto 1fr auto;gap:12px;min-width:0;height:318px;padding:23px 23px 25px;background:var(--lx-white);border:1px solid var(--lx-line);border-radius:17px;box-shadow:0 12px 28px #3427260a;text-align:center;transform-origin:50% 90%}
+.lx-fan-card{position:relative;display:grid;grid-template-rows:auto 1fr auto;gap:10px;min-width:0;height:400px;padding:20px 18px 23px;background:var(--lx-white);border:1px solid var(--lx-line);border-radius:17px;box-shadow:0 12px 28px #3427260a;text-align:center;transform-origin:50% 90%}
 .lx-fan-card:first-child{transform:translateY(14px) rotate(-6deg);z-index:2}
 .lx-fan-card:nth-child(2){transform:translateY(-6px);z-index:3;background:var(--lx-panel)}
 .lx-fan-card:last-child{transform:translateY(14px) rotate(6deg);z-index:1}
 .lx-fan-number{color:var(--lx-action);font:italic 19px/1.3 Georgia,serif;text-align:left}
 body.lockx-public .lx-home .lx-fan-card h3{font:400 clamp(18px,2.25vw,26px)/1.15 Georgia,"Times New Roman",serif;letter-spacing:-.65px;margin:0;color:var(--lx-ink)}
-.lx-fan-art{position:relative;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;height:190px;min-width:0;align-self:center}
+.lx-fan-art{position:relative;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;height:264px;min-width:0;align-self:center}
 .lx-fan-art svg{display:block}
-.lx-fan-capture{width:100%;max-width:235px;height:190px}
-.lx-fan-photos{position:relative;width:210px;height:170px}
-.lx-fan-photos>.lx-item-art{position:absolute;width:104px;height:154px;top:8px;left:9px;transform:rotate(-11deg)}
-.lx-fan-photos>.lx-item-art+svg{left:99px;transform:rotate(10deg)}
-.lx-fan-proof{width:146px;height:178px;padding:7px;background:var(--lx-paper);border:1px solid var(--lx-line);border-radius:9px;transform:rotate(-3deg)}
-.lx-fan-proof>.lx-item-art{width:100%;height:129px}
-.lx-fan-seal{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:4px 3px 0;color:var(--lx-success)}
-.lx-fan-check{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#e7efe7}
-.lx-fan-check svg{width:17px;height:17px}
-.lx-fan-seal>.lx-example-qr{width:25px;height:25px;padding:1px;color:var(--lx-ink);background:var(--lx-white)}
+.lx-fan-capture{width:100%;max-width:320px;height:258px}
+.lx-fan-photos{position:relative;width:100%;max-width:290px;height:224px}
+.lx-fan-photos>.lx-item-art{position:absolute;width:50%;height:215px;top:4px;left:1%;transform:rotate(-11deg)}
+.lx-fan-photos>.lx-item-art+svg{left:46%;transform:rotate(10deg)}
+.lx-fan-proof{width:188px;height:234px;padding:9px;background:var(--lx-paper);border:1px solid var(--lx-line);border-radius:10px;transform:rotate(-3deg)}
+.lx-fan-proof>.lx-item-art{width:100%;height:174px}
+.lx-fan-seal{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:5px 4px 0;color:var(--lx-success)}
+.lx-fan-check{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#e7efe7}
+.lx-fan-check svg{width:21px;height:21px}
+.lx-fan-seal>.lx-example-qr{width:31px;height:31px;padding:1px;color:var(--lx-ink);background:var(--lx-white)}
 body.lockx-public .lx-steps-cta{text-align:center;padding:4px 0 26px}
 body.lockx-public .lx-home .lx-steps-cta .lx-hero-note{color:var(--lx-muted);margin-top:12px;font-size:12px}
 body.lockx-public .lx-home .lx-rose-scope{text-align:center;margin-bottom:40px}
-@media(max-width:760px){
-  body.lockx-public .lx-steps-fan{margin-top:23px;padding:18px 7px 32px;scroll-margin-top:72px}
-  .lx-fan-card{height:270px;padding:18px 13px 21px;gap:8px;border-radius:13px}
-  .lx-fan-art{height:157px}
-  .lx-fan-capture{height:157px}
-  .lx-fan-photos{transform:scale(.78);transform-origin:center}
-  .lx-fan-proof{transform:rotate(-3deg) scale(.85)}
+@media(min-width:761px) and (max-width:1000px){
+  .lx-fan-card{height:365px;padding:18px 13px 22px}
+  .lx-fan-art{height:238px}
+  .lx-fan-capture{height:232px}
+  .lx-fan-photos{height:210px}
+  .lx-fan-photos>.lx-item-art{height:205px}
+  .lx-fan-proof{width:170px;height:216px;padding:8px}
+  .lx-fan-proof>.lx-item-art{height:158px}
 }
-@media(max-width:540px){
-  body.lockx-public .lx-steps-fan{margin-top:21px;padding:12px 6px 32px}
-  .lx-fan-card{height:213px;padding:12px 6px 15px;gap:8px;border-radius:10px}
-  .lx-fan-card:first-child{transform:translateY(10px) rotate(-6deg)}
-  .lx-fan-card:nth-child(2){transform:translateY(-4px)}
-  .lx-fan-card:last-child{transform:translateY(10px) rotate(6deg)}
-  .lx-fan-number{font-size:17px;padding-left:3px}
-  body.lockx-public .lx-home .lx-fan-card h3{font-size:16px;line-height:1.15;letter-spacing:-.35px;min-height:37px;display:flex;align-items:center;justify-content:center}
-  .lx-fan-art{height:112px}
-  .lx-fan-capture{width:86px;max-width:none;height:112px}
-  .lx-fan-photos{width:78px;height:100px;transform:none}
-  .lx-fan-photos>.lx-item-art{width:48px;height:78px;top:12px;left:0}
-  .lx-fan-photos>.lx-item-art+svg{left:30px}
-  .lx-fan-proof{width:68px;height:101px;padding:4px;border-radius:6px;transform:rotate(-3deg)}
-  .lx-fan-proof>.lx-item-art{height:67px}
-  .lx-fan-seal{gap:3px;padding:2px 0 0}
-  .lx-fan-check{width:18px;height:18px}
-  .lx-fan-check svg{width:13px;height:13px}
-  .lx-fan-seal>.lx-example-qr{width:18px;height:18px;padding:1px}
+@media(max-width:760px){
+  body.lockx-public .lx-steps-fan{max-width:400px;margin:24px auto 0;padding:16px 10px 36px;scroll-margin-top:72px}
+  .lx-steps-fan ol{grid-template-columns:minmax(0,1fr);gap:20px}
+  .lx-fan-card{height:350px;padding:16px 14px 20px;gap:8px;border-radius:14px}
+  .lx-fan-card:first-child{transform:rotate(-2deg)}
+  .lx-fan-card:nth-child(2){transform:none}
+  .lx-fan-card:last-child{transform:rotate(2deg)}
+  .lx-fan-number{font-size:19px}
+  body.lockx-public .lx-home .lx-fan-card h3{font-size:25px;line-height:1.15;letter-spacing:-.55px}
+  .lx-fan-art{height:240px}
+  .lx-fan-capture{height:236px}
+  .lx-fan-photos{max-width:274px;height:216px}
+  .lx-fan-photos>.lx-item-art{height:210px}
+  .lx-fan-proof{width:180px;height:222px;padding:8px}
+  .lx-fan-proof>.lx-item-art{height:165px}
   body.lockx-public .lx-steps-cta{padding-top:2px}
 }
