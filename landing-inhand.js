@@ -22,31 +22,29 @@
   function inHandCapture(id) {
     const heldCard = viewId => {
       const card = pokemonCard('front', viewId).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
-      return `<g stroke="#b78b72" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m221 126c10-3 18 7 21 23l5 28 11 30-38 12-9-29c-13-12-18-23-14-36l10-24Z" fill="url(#hand-${id})"/>
-        <path d="m228 122 4-27c1-8 8-5 8 2l2 36-4 16" fill="#e4b797"/>
-        <path d="m210 133-8-1c-8 0-11 7-5 12l14 10c7 4 12-3 7-8Z" fill="#edc4a6"/>
-        <path d="m207 148-7-1c-7 0-9 7-4 12l15 10c7 3 11-3 7-8Z" fill="#e8ba9b"/>
-        <path d="m209 164-7-2c-6-1-9 5-5 10l14 10c6 4 10-1 8-6Z" fill="#dfae8c"/>
-      </g>
-      <g transform="rotate(-8 193 72)"><g transform="translate(89 -5) scale(.77)">${card}</g></g>
-      <g stroke="#b78b72" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m224 99c-5-4-12 0-11 6l4 21c2 9 7 16 14 18 6 1 10-4 8-10l-4-23c-2-7-6-11-11-12Z" fill="url(#hand-${id})"/>
-        <path d="m222 102c-4-1-7 2-6 6l2 9c1 3 4 4 7 3s4-4 3-7l-2-7c-1-2-2-3-4-4Z" fill="#f4d9c4" stroke="#c79a7e"/>
-        <path d="m225 133 8-2m-17 49q10-4 19-1m-31-32 5-4m-6 18 5-4m-3 18 5-4"/>
-        <path d="m216 205 36-12 8 24-39 3Z" fill="#b69b99" stroke="#927876"/>
-        <path d="m223 205 4 13m4-16 4 14m4-17 4 14m4-17 4 14" stroke="#a88c8a" stroke-width=".7"/>
+      return `<g transform="translate(141 5) rotate(12) scale(.38)" stroke="#8c403b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M166 132c11-7 24-5 36 2l27 15c15 9 23 24 29 41l18 47c6 16 16 30 30 40l70 51-36 49-58-39c-15-10-29-14-42-22l-26-15c-14-7-30-14-43-24l-28-24-31-23c-7-6-3-17 4-22l22-14 25-23Z" fill="#ffead6"/>
+        <path d="M119 207c-11 2-15 12-7 20 11 11 26 4 36-6l9-13" fill="#ffead6"/>
+        <path d="M131 228c-13 1-15 13-5 20 12 9 27-2 37-15l6-10" fill="#ffead6"/>
+        <path d="M148 246c-12 4-11 15-1 20 13 6 26-6 32-18" fill="#ffead6"/>
+        <path d="m175 139-2 22m28-16c-3 12-6 26-5 39m30-20c-8 11-10 25-8 38" fill="none" stroke-width="1.45"/>
+        <g transform="translate(-89 -20) scale(1.4)" stroke="none">${card}</g>
+        <path d="M144 174c-9-10-22-11-27-1-8 14 4 27 17 38l32 27c11 9 26 14 42 14l-2-25c-18-9-37-30-53-47-3-3-6-5-9-6Z" fill="#ffead6" stroke="none"/>
+        <path d="M208 252c-16 0-31-5-42-14l-32-27c-13-11-25-24-17-38 5-10 18-9 27 1 3 1 6 3 9 6 16 17 35 38 53 47" fill="none"/>
+        <path d="M128 169c-8-2-14 5-11 13l10 12c5 4 12 0 14-6 1-7-6-15-13-19Z" fill="#fff3e7" stroke-width="1.6"/>
+        <path d="M164 203q13 9 26 12m-20-6q7 10 19 14m-10 3q8 11 23 13m4-7q16 4 28 2m-35 15q17 7 32 5m-21 6q15 9 31 10m-18 4q13 10 29 15m-8 12q13 7 21 16m-5-24q16 9 26 19m-15-31q17 10 27 23" fill="none" stroke-width="1.3"/>
+        <path d="m277 325 10 6m-7-15 11 8m-14-2 3 2m17 8 6 5" fill="none" stroke-width="1.1"/>
       </g>`;
     };
-    return `<svg class="lx-fan-capture" viewBox="0 0 260 220" fill="none" role="img" aria-label="A phone with its video-recording app open, recording a hand holding a Pokémon card" font-family="${font}">
-      <title>A phone with its video-recording app open, recording a hand holding a Pokémon card</title>
-      <defs><linearGradient id="hand-${id}" x1="192" y1="125" x2="250" y2="207" gradientUnits="userSpaceOnUse"><stop stop-color="#f0caae"/><stop offset="1" stop-color="#dca987"/></linearGradient><clipPath id="screen-${id}"><rect x="15" y="52" width="91" height="111" rx="6"/></clipPath></defs>
+    return `<svg class="lx-fan-capture" viewBox="0 0 260 220" fill="none" role="img" aria-label="A phone recording a Pokémon card held by a hand drawn in the Fine line style" font-family="${font}">
+      <title>A phone recording a Pokémon card held by a hand drawn in the Fine line style</title>
+      <defs><clipPath id="screen-${id}"><rect x="15" y="52" width="91" height="111" rx="6"/></clipPath></defs>
       <rect x="5" y="10" width="111" height="207" rx="20" fill="#343034" stroke="#64595d" stroke-width="1.4"/>
       <rect x="10" y="15" width="101" height="197" rx="15" fill="#202126"/>
       <rect x="40" y="20" width="40" height="7" rx="3.5" fill="#08090b"/>
       <circle cx="37" cy="39" r="2.5" fill="#e0776b"/><text x="46" y="42" font-size="8.5" font-weight="500" fill="#fff5ef">00:10</text>
       <rect x="15" y="52" width="91" height="111" rx="6" fill="#e8d6d0"/>
-      <g clip-path="url(#screen-${id})"><svg x="15" y="52" width="91" height="111" viewBox="132 0 128 220">${heldCard(id+'-preview')}</svg></g>
+      <g clip-path="url(#screen-${id})"><svg x="15" y="52" width="91" height="111" viewBox="124 0 136 190">${heldCard(id+'-preview')}</svg></g>
       <path d="M21 66v-8h8m63 0h8v8m0 83v8h-8m-63 0h-8v-8" stroke="#fffcf7" stroke-width="1.2" stroke-linecap="round"/>
       <text x="60.5" y="175" text-anchor="middle" font-size="7.5" font-weight="600" letter-spacing=".6" fill="#f6d78d">VIDEO</text>
       <circle cx="60.5" cy="191" r="12" stroke="#fffcf7" stroke-width="1.4"/>
