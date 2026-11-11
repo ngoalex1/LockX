@@ -22,29 +22,24 @@
   function inHandCapture(id) {
     const heldCard = viewId => {
       const card = pokemonCard('front', viewId).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
-      return `<g transform="translate(141 5) rotate(12) scale(.38)" stroke="#8c403b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M166 132c11-7 24-5 36 2l27 15c15 9 23 24 29 41l18 47c6 16 16 30 30 40l70 51-36 49-58-39c-15-10-29-14-42-22l-26-15c-14-7-30-14-43-24l-28-24-31-23c-7-6-3-17 4-22l22-14 25-23Z" fill="#ffead6"/>
-        <path d="M119 207c-11 2-15 12-7 20 11 11 26 4 36-6l9-13" fill="#ffead6"/>
-        <path d="M131 228c-13 1-15 13-5 20 12 9 27-2 37-15l6-10" fill="#ffead6"/>
-        <path d="M148 246c-12 4-11 15-1 20 13 6 26-6 32-18" fill="#ffead6"/>
-        <path d="m175 139-2 22m28-16c-3 12-6 26-5 39m30-20c-8 11-10 25-8 38" fill="none" stroke-width="1.45"/>
-        <g transform="translate(-89 -20) scale(1.4)" stroke="none">${card}</g>
-        <path d="M144 174c-9-10-22-11-27-1-8 14 4 27 17 38l32 27c11 9 26 14 42 14l-2-25c-18-9-37-30-53-47-3-3-6-5-9-6Z" fill="#ffead6" stroke="none"/>
-        <path d="M208 252c-16 0-31-5-42-14l-32-27c-13-11-25-24-17-38 5-10 18-9 27 1 3 1 6 3 9 6 16 17 35 38 53 47" fill="none"/>
-        <path d="M128 169c-8-2-14 5-11 13l10 12c5 4 12 0 14-6 1-7-6-15-13-19Z" fill="#fff3e7" stroke-width="1.6"/>
-        <path d="M164 203q13 9 26 12m-20-6q7 10 19 14m-10 3q8 11 23 13m4-7q16 4 28 2m-35 15q17 7 32 5m-21 6q15 9 31 10m-18 4q13 10 29 15m-8 12q13 7 21 16m-5-24q16 9 26 19m-15-31q17 10 27 23" fill="none" stroke-width="1.3"/>
-        <path d="m277 325 10 6m-7-15 11 8m-14-2 3 2m17 8 6 5" fill="none" stroke-width="1.1"/>
-      </g>`;
+      return `<svg x="124" y="28" width="176" height="160" viewBox="0 0 420 380" data-original-hand="fine-line-option-1">
+        <defs>
+          <clipPath id="art-${viewId}"><path d="M23 39Q22 29 32 28L165 19Q175 18 176 29L182 143Q197 138 209 144L266 163Q279 168 285 187L308 242Q320 269 335 282L389 316 368 350 351 368 313 349Q284 344 260 337Q230 330 209 316Q187 300 175 281L165 273Q148 269 143 273Q132 275 127 267Q124 261 130 254Q118 254 114 245Q112 239 118 230L122 224 38 229Q28 230 28 220Z"/></clipPath>
+          <mask id="card-${viewId}" maskUnits="userSpaceOnUse" x="15" y="10" width="190" height="230"><path d="m28 36 142-9 10 187-143 9Z" fill="white"/><path d="M139 172c-10 4-7 16 3 27l24 23 20 4 1-24-22-22c-9-9-18-11-26-8Z" fill="black"/></mask>
+        </defs>
+        <image href="assets/fine-line-original-selected.png" width="420" height="380" clip-path="url(#art-${viewId})"/>
+        <g mask="url(#card-${viewId})"><g transform="matrix(1.365 -.0865 .0584 1.2208 -79.7 17.11)">${card}</g></g>
+      </svg>`;
     };
-    return `<svg class="lx-fan-capture" viewBox="0 0 260 220" fill="none" role="img" aria-label="A phone recording a Pokémon card held by a hand drawn in the Fine line style" font-family="${font}">
-      <title>A phone recording a Pokémon card held by a hand drawn in the Fine line style</title>
+    return `<svg class="lx-fan-capture" viewBox="0 0 300 220" fill="none" role="img" aria-label="A phone recording a Pokémon card held by the original selected Fine line hand illustration" font-family="${font}">
+      <title>A phone recording a Pokémon card held by the original selected Fine line hand illustration</title>
       <defs><clipPath id="screen-${id}"><rect x="15" y="52" width="91" height="111" rx="6"/></clipPath></defs>
       <rect x="5" y="10" width="111" height="207" rx="20" fill="#343034" stroke="#64595d" stroke-width="1.4"/>
       <rect x="10" y="15" width="101" height="197" rx="15" fill="#202126"/>
       <rect x="40" y="20" width="40" height="7" rx="3.5" fill="#08090b"/>
       <circle cx="37" cy="39" r="2.5" fill="#e0776b"/><text x="46" y="42" font-size="8.5" font-weight="500" fill="#fff5ef">00:10</text>
       <rect x="15" y="52" width="91" height="111" rx="6" fill="#e8d6d0"/>
-      <g clip-path="url(#screen-${id})"><svg x="15" y="52" width="91" height="111" viewBox="124 0 136 190">${heldCard(id+'-preview')}</svg></g>
+      <g clip-path="url(#screen-${id})"><svg x="15" y="52" width="91" height="111" viewBox="124 20 176 175">${heldCard(id+'-preview')}</svg></g>
       <path d="M21 66v-8h8m63 0h8v8m0 83v8h-8m-63 0h-8v-8" stroke="#fffcf7" stroke-width="1.2" stroke-linecap="round"/>
       <text x="60.5" y="175" text-anchor="middle" font-size="7.5" font-weight="600" letter-spacing=".6" fill="#f6d78d">VIDEO</text>
       <circle cx="60.5" cy="191" r="12" stroke="#fffcf7" stroke-width="1.4"/>
