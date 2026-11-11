@@ -5,6 +5,24 @@
   const check = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 12 4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const arrow = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+  const font = '-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif';
+
+  function pokemonCard(view, id) {
+    const foil = `foil-${id}`;
+    const sky = `sky-${id}`;
+    const pika = `<path d="m139 88 12-16 10 3-9 15 12 5-16 12-10-5" fill="#f7d241" stroke="#c19b21" stroke-width="1.2"/><ellipse cx="126" cy="107" rx="19" ry="18" fill="#fbd645"/><path d="m111 85-9-23 8-2 11 23m13 0 13-23 7 4-9 25" fill="#fbd645" stroke="#c19b21" stroke-width="1.2"/><path d="m102 62 8-2 4 9-8 3m41-12 7 4-5 9-7-4" fill="#37312e"/><ellipse cx="127" cy="89" rx="22" ry="18" fill="#ffdc48"/><ellipse cx="118" cy="86" rx="2.5" ry="3.2" fill="#30282a"/><ellipse cx="135" cy="86" rx="2.5" ry="3.2" fill="#30282a"/><circle cx="117.4" cy="85" r=".8" fill="white"/><circle cx="134.4" cy="85" r=".8" fill="white"/><circle cx="110" cy="94" r="4.2" fill="#e96445"/><circle cx="144" cy="94" r="4.2" fill="#e96445"/><path d="m125 91 2 1 2-1m-7 7q5 4 10-1" stroke="#52332c" stroke-width="1.5" stroke-linecap="round"/><path d="m109 104-7 9m39-9 7 7" stroke="#ebba26" stroke-width="7" stroke-linecap="round"/><ellipse cx="116" cy="122" rx="8" ry="4" fill="#eac231"/><ellipse cx="137" cy="122" rx="8" ry="4" fill="#eac231"/>`;
+    const front = `<rect x="78" y="21" width="104" height="154" rx="7" fill="#ddae36"/><rect x="82" y="25" width="96" height="146" rx="4" fill="#f6da75"/><rect x="85" y="28" width="90" height="14" rx="2" fill="#f9e69e"/><text x="88" y="38" fill="#3a352c" font-size="8" font-weight="750">Pikachu</text><text x="156" y="38" fill="#51422c" font-size="5.2" font-weight="600">HP 60</text><circle cx="170" cy="35" r="3.4" fill="#e7bf38"/><path d="m170 32-2 4h2l-1 3 3-5h-2Z" fill="#51422c"/><rect x="87" y="45" width="86" height="83" rx="1" fill="url(#${sky})" stroke="#bc9430" stroke-width="2"/><path d="M88 108q19-21 44-8t40-6v33H88Z" fill="#78b987"/><path d="M88 118q32-18 84-6v15H88Z" fill="#a4cd7d"/>${pika}<rect x="88" y="133" width="84" height="5" rx="1" fill="#eed18a"/><circle cx="92" cy="146" r="3" fill="#f4bd2e" stroke="#b18c25" stroke-width=".5"/><path d="m93 143-2 3h2l-1 3" stroke="#735b30" stroke-width=".7"/><text x="100" y="148" fill="#51442a" font-size="6" font-weight="650">Thunder Shock</text><text x="163" y="148" fill="#51442a" font-size="6" font-weight="650">20</text><path d="M88 153h74m-74 3h65" stroke="#b49b59" stroke-width=".7"/><text x="88" y="165" fill="#695735" font-size="4.2">025 / 102</text><path d="m169 161 .8 1.7 1.8.3-1.3 1.3.3 1.8-1.6-.9-1.6.9.3-1.8-1.3-1.3 1.8-.3Z" fill="#817036"/><rect x="82" y="25" width="96" height="146" rx="4" fill="url(#${foil})" opacity=".23"/>`;
+    const back = `<rect x="78" y="21" width="104" height="154" rx="7" fill="#293f8d"/><rect x="83" y="26" width="94" height="144" rx="4" fill="#2366b5" stroke="#d2e6fa" stroke-width="1"/><path d="M86 59q64-56 87 36t-76 50q75 22 60-46T88 88" stroke="#c0d9ed" stroke-width="9" opacity=".7"/><path d="M91 75q69-54 78 34t-70 28q54 9 52-31t-52-19" stroke="#f6f8fa" stroke-width="3" opacity=".75"/><g transform="rotate(-9 130 101)"><circle cx="130" cy="101" r="26" fill="#fff" stroke="#183854" stroke-width="3"/><path d="M104 101a26 26 0 0 1 52 0Z" fill="#db4b48"/><path d="M104 101h52" stroke="#183854" stroke-width="4"/><circle cx="130" cy="101" r="8" fill="#fff" stroke="#183854" stroke-width="3"/></g><text x="130" y="58" text-anchor="middle" font-size="18" font-weight="900" font-style="italic" fill="#ffdb3f" stroke="#183e7e" stroke-width="2.8" paint-order="stroke">Pokémon</text><text x="130" y="155" text-anchor="middle" font-size="18" font-weight="900" font-style="italic" fill="#ffdb3f" stroke="#183e7e" stroke-width="2.8" paint-order="stroke" transform="rotate(180 130 150)">Pokémon</text>`;
+    let art = view === 'back' ? back : front;
+    if (view === 'detail') art = `<g transform="translate(-72 -110) scale(1.55)">${front}</g>`;
+    if (view === 'angle') art = `<g transform="translate(10 4) rotate(-9 130 100) skewY(-2)">${front}</g>`;
+    return `<svg viewBox="0 0 260 200" class="lx-camera lx-item-art" fill="none" aria-hidden="true" font-family="${font}"><defs><linearGradient id="${sky}" x1="88" y1="47" x2="173" y2="128" gradientUnits="userSpaceOnUse"><stop stop-color="#a9d9ee"/><stop offset=".5" stop-color="#d8efca"/><stop offset="1" stop-color="#b3d6a1"/></linearGradient><linearGradient id="${foil}" x1="82" y1="30" x2="178" y2="165" gradientUnits="userSpaceOnUse"><stop stop-color="#fff" stop-opacity="0"/><stop offset=".4" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><ellipse cx="133" cy="184" rx="54" ry="6" fill="#24384d" opacity=".1"/><g>${art}</g></svg>`;
+  }
+
+  function qr() {
+    return '<svg class="lx-example-qr" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm16-2h9v9h-9zm2 2v5h5V3zM1 19h9v9H1zm2 2v5h5v-5z" fill-rule="evenodd"/><path d="M4 4h3v3H4zm18 0h3v3h-3zM4 22h3v3H4zm8-21h2v4h-2zm3 3h2v7h-2zm-4 4h3v3h-3zm0 5h3v3h-3zm5-1h3v3h-3zm5 0h5v2h-5zm4 4h3v4h-3zM1 12h4v3H1zm6 0h3v5H7zm-5 4h3v2H2zm10 3h3v3h-3zm4-3h5v2h-5zm1 4h3v5h-3zm5 1h2v3h-2zm3 3h3v4h-3zm-4 2h2v2h-2zm-9-1h3v3h-3zm11-10h2v3h-2z"/></svg>';
+  }
+
   const markup = `
     <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
       <div class="lx-hero lx-wrap lx-rose-hero">
@@ -12,38 +30,14 @@
           <div><p class="lx-eyebrow">Details make the difference.</p><h1 id="lxHeroTitle">Your photos.<br>Your item. <em>Confirmed.</em></h1></div>
           <p class="lx-rose-intro">For the things you collect,<br>the stories you pass on,<br>and the details that matter.</p>
         </div>
-        <section class="lx-rose-animation" id="lxHowItWorks" aria-label="How LockX works">
-<div id="lockx-pokemon-demo">
-  <div class="lx-demo" id="lockx-photo-demo" data-phase="photos" data-playing="false" data-ended="false" data-motion="true" aria-label="Photo to proof — Pokémon card demonstration">
-    <div class="demo-top"><span class="demo-brand">lock<span>x</span></span><small>Illustrative sequence</small></div>
-    <div class="step-nav" aria-label="Animation steps">
-      <button type="button" data-step="0" aria-current="step"><b>01</b><span>Take photos.</span></button>
-      <button type="button" data-step="1"><b>02</b><span>10-second video.</span></button>
-      <button type="button" data-step="2"><b>03</b><span>Photos verified.</span></button>
-    </div>
-    <div class="stage" aria-label="Pokémon card photos, followed by a phone recording a hand turning the card through 360 degrees, then verified photos">
-      <div class="photo-pile" data-photos aria-label="Front, back, and detail photos of a Pokémon card">
-        <div class="photo-shot"><div class="photo-image"><span class="card-slot"></span><span class="verified-stamp"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 12 4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><div class="photo-meta"><span data-photo-label="Front">Front</span><svg class="qr" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm16-2h9v9h-9zm2 2v5h5V3zM1 19h9v9H1zm2 2v5h5v-5z" fill-rule="evenodd"/><path d="M4 4h3v3H4zm18 0h3v3h-3zM4 22h3v3H4zm8-21h2v4h-2zm3 3h2v7h-2zm-4 4h3v3h-3zm0 5h3v3h-3zm5-1h3v3h-3zm5 0h5v2h-5zm4 4h3v4h-3zM1 12h4v3H1zm6 0h3v5H7zm-5 4h3v2H2zm10 3h3v3h-3zm4-3h5v2h-5zm1 4h3v5h-3zm5 1h2v3h-2zm3 3h3v4h-3zm-4 2h2v2h-2zm-9-1h3v3h-3zm11-10h2v3h-2z"/></svg></div></div>
-        <div class="photo-shot"><div class="photo-image"><span class="card-slot"></span><span class="verified-stamp"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 12 4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><div class="photo-meta"><span data-photo-label="Back">Back</span><svg class="qr" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm16-2h9v9h-9zm2 2v5h5V3zM1 19h9v9H1zm2 2v5h5v-5z" fill-rule="evenodd"/><path d="M4 4h3v3H4zm18 0h3v3h-3zM4 22h3v3H4zm8-21h2v4h-2zm3 3h2v7h-2zm-4 4h3v3h-3zm0 5h3v3h-3zm5-1h3v3h-3zm5 0h5v2h-5zm4 4h3v4h-3zM1 12h4v3H1zm6 0h3v5H7zm-5 4h3v2H2zm10 3h3v3h-3zm4-3h5v2h-5zm1 4h3v5h-3zm5 1h2v3h-2zm3 3h3v4h-3zm-4 2h2v2h-2zm-9-1h3v3h-3zm11-10h2v3h-2z"/></svg></div></div>
-        <div class="photo-shot"><div class="photo-image"><span class="card-slot"></span><span class="verified-stamp"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 12 4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><div class="photo-meta"><span data-photo-label="Details">Details</span><svg class="qr" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm16-2h9v9h-9zm2 2v5h5V3zM1 19h9v9H1zm2 2v5h5v-5z" fill-rule="evenodd"/><path d="M4 4h3v3H4zm18 0h3v3h-3zM4 22h3v3H4zm8-21h2v4h-2zm3 3h2v7h-2zm-4 4h3v3h-3zm0 5h3v3h-3zm5-1h3v3h-3zm5 0h5v2h-5zm4 4h3v4h-3zM1 12h4v3H1zm6 0h3v5H7zm-5 4h3v2H2zm10 3h3v3h-3zm4-3h5v2h-5zm1 4h3v5h-3zm5 1h2v3h-2zm3 3h3v4h-3zm-4 2h2v2h-2zm-9-1h3v3h-3zm11-10h2v3h-2z"/></svg></div></div>
-      </div>
-      <div class="recording-scene" data-camera aria-hidden="true">
-        <div class="recording-column">
-          <div class="phone"><div class="phone-top"><span class="phone-brand">lockx</span><span class="countdown" data-countdown>00:10</span></div><div class="camera-view"><div class="grip-view" data-grip></div><span class="camera-frame"></span></div><div class="phone-status" data-camera-status>Live view</div></div>
-          <span class="recording-caption">Camera recording</span>
-        </div>
-        <div class="hand-column"><span class="turn-orbit"></span><div class="grip-view" data-grip></div><span class="recording-caption" data-angle>Front · 0°</span></div>
-      </div>
-    </div>
-    <div class="demo-footer">
-      <button class="play-demo" type="button" data-play><svg class="play-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m8 5 11 7-11 7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><svg class="pause-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="replay-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-play-label>Play animation</span></button>
-      <small>10-second recording. Comparison time varies.<br>Only photos that pass receive verification.</small>
-    </div>
-    <span class="sr-only" data-live-state aria-live="polite">Step 1. Take photos of the Pokémon card.</span>
-  </div>
-</div>
+        <section class="lx-steps-fan" id="lxHowItWorks" aria-label="How LockX works in three steps">
+          <ol>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">01</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-photos">${pokemonCard('front','fan-photo-front').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}${pokemonCard('back','fan-photo-back').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}</div></div><h3>Take photos</h3></li>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">02</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-phone">${pokemonCard('front','fan-video').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<span class="lx-fan-rec">00:10</span></div></div><h3>Confirm with video</h3></li>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">03</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-proof">${pokemonCard('front','fan-proof').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<div class="lx-fan-seal"><span class="lx-fan-check">${check}</span>${qr()}</div></div></div><h3>Get verified</h3></li>
+          </ol>
         </section>
-        <div class="lx-animation-cta"><a class="lx-button" href="#in-hand">Verify your photos ${arrow}</a><p class="lx-hero-note">No app. No account. Just your photos and camera.</p></div>
+        <div class="lx-steps-cta"><a class="lx-button" href="#in-hand">Verify your photos ${arrow}</a><p class="lx-hero-note">No app. No account. Just your photos and camera.</p></div>
         <p class="lx-rose-scope">Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</p>
       </div>
 
@@ -70,7 +64,6 @@
       old.outerHTML = markup;
       document.getElementById('landing')?.classList.toggle('active', active);
     }
-    window.LockXAnimation?.install();
     if (!document.getElementById('lockxPublicHeader')) {
       const header = document.createElement('header');
       header.id = 'lockxPublicHeader';
