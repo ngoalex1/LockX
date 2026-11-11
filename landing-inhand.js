@@ -19,6 +19,44 @@
     return `<svg viewBox="0 0 260 200" class="lx-camera lx-item-art" fill="none" aria-hidden="true" font-family="${font}"><defs><linearGradient id="${sky}" x1="88" y1="47" x2="173" y2="128" gradientUnits="userSpaceOnUse"><stop stop-color="#a9d9ee"/><stop offset=".5" stop-color="#d8efca"/><stop offset="1" stop-color="#b3d6a1"/></linearGradient><linearGradient id="${foil}" x1="82" y1="30" x2="178" y2="165" gradientUnits="userSpaceOnUse"><stop stop-color="#fff" stop-opacity="0"/><stop offset=".4" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><ellipse cx="133" cy="184" rx="54" ry="6" fill="#24384d" opacity=".1"/><g>${art}</g></svg>`;
   }
 
+  function inHandCapture(id) {
+    const card = pokemonCard('front', id).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+    return `<svg class="lx-fan-capture" viewBox="0 0 260 220" fill="none" role="img" aria-label="A camera recording a hand holding a Pokémon card" font-family="${font}">
+      <title>A camera recording a hand holding a Pokémon card</title>
+      <defs><linearGradient id="hand-${id}" x1="180" y1="130" x2="238" y2="207" gradientUnits="userSpaceOnUse"><stop stop-color="#edc4a5"/><stop offset="1" stop-color="#dba888"/></linearGradient><linearGradient id="lens-${id}" x1="49" y1="112" x2="82" y2="151" gradientUnits="userSpaceOnUse"><stop stop-color="#7597b4"/><stop offset=".45" stop-color="#344e68"/><stop offset="1" stop-color="#24384b"/></linearGradient></defs>
+      <path d="M110 111q10-22 30-28" stroke="#a17c7f" stroke-width="1.5" stroke-dasharray="3 5" stroke-linecap="round"/>
+      <g stroke="#53616a" stroke-width="1.3" stroke-linejoin="round">
+        <path d="m24 98 7-14h34l10 14" fill="#c2c8cc"/>
+        <rect x="6" y="98" width="105" height="73" rx="11" fill="#69757e"/>
+        <path d="M17 98h83a11 11 0 0 1 11 11v14H6v-14a11 11 0 0 1 11-11Z" fill="#cbd0d2"/>
+        <rect x="8" y="120" width="21" height="46" rx="6" fill="#56616a"/>
+        <path d="M14 129h8m-8 7h8m-8 7h8m-8 7h8" stroke="#829099"/>
+        <rect x="18" y="104" width="17" height="5" rx="2" fill="#a3adb4" stroke="none"/>
+        <rect x="88" y="105" width="15" height="10" rx="3" fill="#edf0ec" stroke="#96a4ac"/>
+        <circle cx="65" cy="134" r="30" fill="#a9b4bb"/>
+        <circle cx="65" cy="134" r="25" fill="#34434f" stroke="#dce2e4" stroke-width="1.6"/>
+        <circle cx="65" cy="134" r="19" fill="url(#lens-${id})" stroke="#8294a3" stroke-width="1.3"/>
+        <ellipse cx="59" cy="127" rx="7" ry="5" fill="#b4d5eb" opacity=".55" stroke="none"/>
+        <circle cx="99" cy="122" r="2.4" fill="#c76c5c" stroke="none"/>
+      </g>
+      <g transform="translate(10 53)"><rect width="69" height="24" rx="12" fill="#fffcf7"/><circle cx="14" cy="12" r="3" fill="#b9544d"/><text x="25" y="16" font-size="11" font-weight="500" fill="#874c50">00:10</text></g>
+      <g stroke="#bb8d72" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m201 214-9-29c-13-10-14-23-8-35l15-28c6-12 16-12 23-2l12 18c6 9 7 21 6 38l9 37Z" fill="url(#hand-${id})"/>
+        <path d="m214 129 5-24c1-7 10-7 12 0l7 36-2 27" fill="#e6b797"/>
+        <path d="m228 139 2-10c1-6 8-6 10 0l3 29-4 18" fill="#e7b99b"/>
+        <path d="m236 158 1-8c1-6 7-5 8 1l2 21-7 12" fill="#e1ae8d"/>
+      </g>
+      <g transform="rotate(-8 193 72)"><g transform="translate(89 -5) scale(.77)">${card}</g></g>
+      <g stroke="#bb8d72" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m194 119 18 24c4 5 6 13 1 17s-11 1-15-4l-16-22c-4-6-4-12 0-16s9-3 12 1Z" fill="url(#hand-${id})"/>
+        <path d="m185 119 8 9c2 3 2 6 0 8s-5 1-7-2l-5-7c-2-3-1-6 1-8Z" fill="#f2d6c1" stroke="#c99c82"/>
+        <path d="m198 146 8-3m-5 37q10-5 22-2"/>
+        <path d="m198 204 46-10 7 23-46 3Z" fill="#b69b99" stroke="#927876"/>
+        <path d="m207 204 3 13m5-15 3 14m5-16 3 14m5-16 3 14m5-15 3 13" stroke="#a88c8a" stroke-width=".7"/>
+      </g>
+    </svg>`;
+  }
+
   function qr() {
     return '<svg class="lx-example-qr" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm16-2h9v9h-9zm2 2v5h5V3zM1 19h9v9H1zm2 2v5h5v-5z" fill-rule="evenodd"/><path d="M4 4h3v3H4zm18 0h3v3h-3zM4 22h3v3H4zm8-21h2v4h-2zm3 3h2v7h-2zm-4 4h3v3h-3zm0 5h3v3h-3zm5-1h3v3h-3zm5 0h5v2h-5zm4 4h3v4h-3zM1 12h4v3H1zm6 0h3v5H7zm-5 4h3v2H2zm10 3h3v3h-3zm4-3h5v2h-5zm1 4h3v5h-3zm5 1h2v3h-2zm3 3h3v4h-3zm-4 2h2v2h-2zm-9-1h3v3h-3zm11-10h2v3h-2z"/></svg>';
   }
@@ -33,7 +71,7 @@
         <section class="lx-steps-fan" id="lxHowItWorks" aria-label="How LockX works in three steps">
           <ol>
             <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">01</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-photos">${pokemonCard('front','fan-photo-front').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}${pokemonCard('back','fan-photo-back').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}</div></div><h3>Take photos</h3></li>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">02</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-phone">${pokemonCard('front','fan-video').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<span class="lx-fan-rec">00:10</span></div></div><h3>Confirm with video</h3></li>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">02</span><div class="lx-fan-art">${inHandCapture('fan-video')}</div><h3>Confirm with video</h3></li>
             <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">03</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-proof">${pokemonCard('front','fan-proof').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<div class="lx-fan-seal"><span class="lx-fan-check">${check}</span>${qr()}</div></div></div><h3>Get verified</h3></li>
           </ol>
         </section>
