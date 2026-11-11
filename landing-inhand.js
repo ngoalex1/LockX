@@ -83,31 +83,39 @@
 
   const markup = `
     <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
-      <div class="lx-hero lx-wrap">
-        <p class="lx-eyebrow">LockX In-hand Verified</p>
-        <h1 id="lxHeroTitle">Your photos.<br>Your item. <span>Confirmed.</span></h1>
-        <p class="lx-hero-copy">Show it once. Share it with confidence.<br>Match your listing photos to a 10-second video of the item in your hands.</p>
-        <div class="lx-hero-actions"><a class="lx-button" href="#in-hand">Verify your photos ${arrow}</a><button class="lx-text-link" type="button" data-home-scroll="lxHowItWorks">See how it works <span aria-hidden="true">⌄</span></button></div>
-        <p class="lx-hero-note">No app. No account. Just your photos and camera.</p>
-      </div>
-
-      <div class="lx-product-stage lx-wrap" role="img" aria-label="Illustrative examples: four Pokémon card listing photos, a ten-second concert ticket video, and a QR-marked AP Royal Oak watch sketch linking to a verification record.">
-        <div class="lx-stage-halo"></div>
-        <div class="lx-reference-set"><div class="lx-stage-label">Your listing photos <span>4 views</span></div><div class="lx-reference-grid"><div>${pokemonCard('front','ref1')}</div><div>${pokemonCard('angle','ref2')}</div><div>${pokemonCard('back','ref3')}</div><div>${pokemonCard('detail','ref4')}</div></div><div class="lx-set-caption">The details that make it yours.</div></div>
-        <div class="lx-stage-connector lx-stage-connector--first">${arrow}</div>
-        <div class="lx-demo-phone"><div class="lx-phone-island"></div><div class="lx-phone-topline"><span>lockx</span><span class="lx-phone-timer"><i></i> 00:10</span></div><div class="lx-phone-view"><div class="lx-focus-corner lx-focus-corner--tl"></div><div class="lx-focus-corner lx-focus-corner--tr"></div><div class="lx-focus-corner lx-focus-corner--bl"></div><div class="lx-focus-corner lx-focus-corner--br"></div>${concertTickets('angle','video')}</div><div class="lx-phone-guidance"><span class="lx-small-check">${check}</span><strong>A little turn.<br>A clearer picture.</strong><span>Show the front, sides, and back.</span></div><div class="lx-phone-progress"><i></i></div><div class="lx-phone-bottom">10 seconds. Stops automatically.</div><div class="lx-phone-homebar"></div></div>
-        <div class="lx-stage-connector lx-stage-connector--second">${arrow}</div>
-        <div class="lx-demo-result"><div class="lx-result-heading"><span>${check}</span><div>Photo matched<small>Illustrative example</small></div></div><div class="lx-result-photo">${royalOakSketch('result')}</div><div class="lx-result-footer"><span><strong>lockx</strong><small>In-hand Verified</small></span>${qr()}</div><div class="lx-result-record">Photos with a story you can check.</div></div>
-        <p class="lx-illustration-note">Illustrative example. Actual results depend on the evidence captured.</p>
+      <div class="lx-hero lx-wrap lx-rose-hero">
+        <div class="lx-rose-header">
+          <div><p class="lx-eyebrow">Details make the difference.</p><h1 id="lxHeroTitle">Your photos.<br>Your item. <em>Confirmed.</em></h1></div>
+          <p class="lx-rose-intro">For the things you collect,<br>the stories you pass on,<br>and the details that matter.</p>
+        </div>
+        <div class="lx-rose-main">
+          <figure class="lx-rose-gallery" aria-label="Illustrative AP Royal Oak watch sketch with a LockX photo verification record">
+            ${royalOakSketch('hero')}
+            <figcaption class="lx-rose-record"><div><span class="lx-rose-record-title">${check} Photo matched</span><small>In-hand Verified · Illustrative example</small></div>${qr()}</figcaption>
+          </figure>
+          <div class="lx-rose-walkthrough">
+            <p class="lx-eyebrow">LockX In-hand Verified</p>
+            <h2>A clearer picture,<br>in three simple steps.</h2>
+            <ol class="lx-rose-steps">
+              <li><span aria-hidden="true">01</span><div><strong>Start with your photos.</strong><p>Choose the exact views for your listing.</p></div></li>
+              <li><span aria-hidden="true">02</span><div><strong>Show the details.</strong><p>Record the item for 10 seconds on your phone.</p></div></li>
+              <li><span aria-hidden="true">03</span><div><strong>Give buyers a record to check.</strong><p>Save approved photos with a verification QR code.</p></div></li>
+            </ol>
+            <div class="lx-hero-actions"><a class="lx-button" href="#in-hand">Verify your photos ${arrow}</a><button class="lx-text-link" type="button" data-home-scroll="lxHowItWorks">See how it works <span aria-hidden="true">⌄</span></button></div>
+            <p class="lx-hero-note">No app. No account. Just your photos and camera.</p>
+          </div>
+        </div>
+        <p class="lx-rose-scope">Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</p>
       </div>
 
       <section class="lx-process lx-section lx-wrap" id="lxHowItWorks" aria-labelledby="lxHowTitle">
         <div class="lx-section-heading"><p class="lx-eyebrow">Small effort. Clearer evidence.</p><h2 id="lxHowTitle">From listing photos<br>to a verified photo set.</h2><p>One simple flow, right in your phone’s browser.</p></div>
         <div class="lx-process-grid">
-          <article><span class="lx-step">01</span><div class="lx-process-icon"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="7" y="10" width="23" height="25" rx="4" stroke="currentColor" stroke-width="1.8"/><path d="M13 5h17a5 5 0 0 1 5 5v18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m8 28 7-8 6 5 4-4 5 6" stroke="currentColor" stroke-width="1.8"/><circle cx="23" cy="17" r="2" fill="currentColor"/></svg></div><h3>Add your photos.</h3><p>Choose the exact listing photos you want to verify. Four views are a great place to start.</p></article>
-          <article><span class="lx-step">02</span><div class="lx-process-icon"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="11" y="3" width="19" height="34" rx="5" stroke="currentColor" stroke-width="1.8"/><path d="M17 7h7m-7 26h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="20.5" cy="20" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m19 17 4 3-4 3v-6Z" fill="currentColor"/></svg></div><h3>Show it for 10 seconds.</h3><p>Turn the item to show its different sides. Recording stops automatically, then AI compares the views.</p></article>
-          <article><span class="lx-step">03</span><div class="lx-process-icon"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M6 6h10v10H6zm18 0h10v10H24zM6 24h10v10H6z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M24 23h4v5h6v6H23v-5m10-7v2M9 10h4v3H9zm18 0h4v3h-4zM9 28h4v3H9z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Save. List. Share.</h3><p>Each photo that passes verification appears on the same page with a QR code, ready to save.</p></article>
+          <article><span class="lx-step">01</span><div class="lx-example-art lx-example-art--photos" role="img" aria-label="Illustrative front and back views of a Pokémon card">${pokemonCard('front','process-front')}${pokemonCard('back','process-back')}</div><h3>Add your photos.</h3><p>Choose the exact listing photos you want to verify. Four views are a great place to start.</p></article>
+          <article><span class="lx-step">02</span><div class="lx-example-art lx-example-art--video" role="img" aria-label="Illustrative concert tickets shown during a ten-second recording">${concertTickets('angle','process-video')}<span class="lx-example-timer">00:10</span></div><h3>Show it for 10 seconds.</h3><p>Turn the item to show its different sides. Recording stops automatically, then AI compares the views.</p></article>
+          <article><span class="lx-step">03</span><div class="lx-example-art lx-example-art--record" role="img" aria-label="Illustrative AP Royal Oak watch sketch">${royalOakSketch('process-result')}</div><h3>Save. List. Share.</h3><p>Each photo that passes verification appears on the same page with a QR code, ready to save.</p></article>
         </div>
+        <p class="lx-examples-note">Illustrative item examples. Actual results depend on the evidence captured.</p>
       </section>
 
       <section class="lx-details-section" aria-labelledby="lxDetailsTitle"><div class="lx-wrap lx-detail-layout"><div class="lx-detail-title"><p class="lx-eyebrow">The difference is in the details.</p><h2 id="lxDetailsTitle">More than<br>a similar-looking item.</h2><p>LockX compares the features that connect your photos to the item in the video.</p></div><div class="lx-detail-list"><article><span>01</span><div><h3>Markings. Text. Numbers.</h3><p>Distinctive details, visible wear, and readable numbers help establish a match. A different serial number matters.</p></div></article><article><span>02</span><div><h3>A result for every photo.</h3><p>Each selected photo is checked. If a view is unclear or the evidence does not match, you see what needs attention.</p></div></article><article><span>03</span><div><h3>A QR code that tells the story.</h3><p>Approved images link back to their LockX verification record, so a buyer can check the photo set.</p></div></article></div></div></section>
