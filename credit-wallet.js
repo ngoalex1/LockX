@@ -8,6 +8,7 @@
   let lastFocus, waitingCheckout, refreshNumber = 0, googlePurchase;
   const pendingKey = 'lockx.pendingCheckout';
   const attemptKey = 'lockx.checkoutAttempt';
+  const scriptLoads = new Map();
   function stored(key) { try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { return null; } }
   function save(key, value) { try { if (value) sessionStorage.setItem(key, JSON.stringify(value)); else sessionStorage.removeItem(key); } catch {} }
   function checkoutAttempt(provider, packId) {
@@ -143,9 +144,12 @@
       balance=null;waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);clearInterval(polling);await renderWallet();updateBalanceLabels();
     });
     $('#cwPayPal').onclick=buyPayPal;
-    if(signed)await refreshWallet();
-    if(signed&&config.apple_pay_ready)setupApplePay().catch(()=>{});
+    if(signed&&config.apple_pay_ready)setupApplePay();
     if(signed&&config.google_pay_ready)setupGooglePay().catch(()=>{const el=$('#cwGooglePay');if(el)el.textContent='Google Pay is unavailable on this device. You can use the payment options above.';});
+    if(signed)refreshWallet().catch(()=>{
+      const history=$('#cwHistory');if(history)history.textContent='Your balance could not refresh. Close and reopen your wallet to try again.';
+      message('Your balance could not refresh. You can still choose a payment option below.',true);
+    });
   }
   function updatePackSummary() {
     const p=pack();const el=$('#cwSelectedSummary');
@@ -206,7 +210,21 @@
     };
     check();polling=setInterval(check,2500);
   }
-  function loadScript(src) { return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=()=>reject(Error('Payment options could not load.'));document.head.append(script);}); }
+  function loadScript(src) {
+    if(scriptLoads.has(src))return scriptLoads.get(src);
+    const pending=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');script.src=src;
+      let settled=false;
+      const finish=error=>{
+        if(settled)return;settled=true;clearTimeout(timer);script.onload=null;script.onerror=null;
+        if(error){script.remove();scriptLoads.delete(src);reject(error);}else resolve();
+      };
+      const timer=setTimeout(()=>finish(Error('Payment options took too long to load.')),15000);
+      script.onload=()=>finish();script.onerror=()=>finish(Error('Payment options could not load.'));
+      document.head.append(script);
+    });
+    scriptLoads.set(src,pending);return pending;
+  }
   function loadPayPalWalletSDK() {
     const components=[config.apple_pay_ready?'applepay':null,config.google_pay_ready?'googlepay':null].filter(Boolean);
     if(components.every(name=>window.paypal?.[name==='applepay'?'Applepay':'Googlepay']))return Promise.resolve();
@@ -219,14 +237,22 @@
   }
   async function setupApplePay() {
     const container=$('#cwApplePay');if(!container)return;
+    applePayState(container,'Loading Apple Pay…');
     if(!appleBoot)appleBoot=(async()=>{
       await Promise.all([loadPayPalWalletSDK(),loadScript('https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js')]);
       if(!window.ApplePaySession||!ApplePaySession.canMakePayments())return null;
-      const applepay=window.paypal.Applepay();const settings=await applepay.config();
+      const applepay=window.paypal.Applepay();let deadline;
+      const settings=await Promise.race([
+        applepay.config(),
+        new Promise((resolve,reject)=>{deadline=setTimeout(()=>reject(Error('Apple Pay took too long to respond.')),15000);}),
+      ]).finally(()=>clearTimeout(deadline));
       return settings.isEligible?{applepay,settings}:null;
     })().catch(error=>{appleBoot=null;throw error;});
-    const available=await appleBoot;
-    if(!available||!container.isConnected)return;
+    let available;
+    try{available=await appleBoot;}
+    catch{applePayState(container,'Apple Pay could not load. Please try again, or use PayPal or card.',true);return;}
+    if(!available){appleBoot=null;applePayState(container,'Apple Pay is unavailable right now. You can use PayPal or card.',true);return;}
+    if(!container.isConnected)return;
     const {applepay,settings}=available;
     const button=document.createElement('apple-pay-button');
     button.setAttribute('buttonstyle','black');button.setAttribute('type','buy');button.setAttribute('locale','en-US');
@@ -299,6 +325,16 @@
       }
     };
     container.replaceChildren(button);container.hidden=false;
+  }
+  function applePayState(container,copy,retry=false) {
+    if(!container.isConnected)return;
+    const status=document.createElement('p');status.className='cw-apple-pay-status';status.setAttribute('role','status');status.textContent=copy;
+    const children=[status];
+    if(retry){
+      const button=document.createElement('button');button.type='button';button.className='cw-text-button cw-apple-pay-retry';button.textContent='Try Apple Pay again';
+      button.onclick=()=>setupApplePay();children.push(button);
+    }
+    container.replaceChildren(...children);container.hidden=false;
   }
   async function setupGooglePay() {
     if(!googleBoot)googleBoot=(async()=>{

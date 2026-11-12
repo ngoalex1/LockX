@@ -13,10 +13,11 @@ class Element {
   removeAttribute(name){delete this.attributes[name];}
   replaceChildren(...children){this.children=children;}
   addEventListener(){}
+  remove(){this.isConnected=false;}
 }
 
 async function harness(options={}) {
-  const events=[], requests=[], scripts=[], listeners={}, sessions=[];
+  const events=[], requests=[], scripts=[], listeners={}, sessions=[], timers=new Map();let nextTimer=0;
   const nodes=new Map([['#cwApplePay',new Element()],['#cwGooglePay',new Element()],['#cwMessage',new Element()],['#cwSelectedSummary',new Element()]]);
   const config={credits_required:false,payment_ready:true,apple_pay_ready:true,google_pay_ready:false,paypal_client_id:'public-client',packs:[{id:'regular',credits:20,amount_cents:1000},{id:'large',credits:40,amount_cents:2000}]};
   let syncGesture=false;
@@ -38,18 +39,18 @@ async function harness(options={}) {
   const fetch=async (url,init={})=>{
     if(url.endsWith('/catalog'))return response(config);
     const body=init.body?JSON.parse(init.body):undefined;requests.push({url,body});
-    if(url.endsWith('/wallet')){if(options.walletThrows)throw Error('Wallet temporarily unavailable');return response({balance:20,history:[]});}
+    if(url.endsWith('/wallet')){if(options.walletThrows)throw Error('Wallet temporarily unavailable');if(options.walletPending)await options.walletPending;return response({balance:20,history:[]});}
     if(url.endsWith('/capture')){events.push(['capture',body]);if(options.capture)await options.capture(body);return response({status:'paid'});}
     if(url.endsWith('/checkouts')&&init.method==='POST')return response({id:'checkout-20',paypal_order_id:'server-order',credits:body.pack_id==='large'?40:20,status:'pending'});
     return response({status:'pending'});
   };
-  const context={window,document,fetch,ApplePaySession:Session,API_BASE:'https://api.example.test',location:{search:'',origin:'https://lockx.ai'},URL,URLSearchParams,sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:{randomUUID:()=> 'idempotency-key'},setInterval:()=>1,clearInterval(){},setTimeout(){},console};
+  const context={window,document,fetch,ApplePaySession:Session,API_BASE:'https://api.example.test',location:{search:'',origin:'https://lockx.ai'},URL,URLSearchParams,sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:{randomUUID:()=> 'idempotency-key'},setInterval:()=>1,clearInterval(){},setTimeout(fn,delay){const id=++nextTimer;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},console};
   vm.createContext(context);
-  const instrumented=source.replace('window.LockXCredits={ready,', 'window.__walletTest={setupApplePay,loadPayPalWalletSDK,renderWallet,updatePackSummary,setSelected:value=>{selected=value;},state:()=>({selected,busy,appleSession})};window.LockXCredits={ready,');
+  const instrumented=source.replace('window.LockXCredits={ready,', 'window.__walletTest={setupApplePay,loadScript,loadPayPalWalletSDK,renderWallet,updatePackSummary,setSelected:value=>{selected=value;},state:()=>({selected,busy,appleSession})};window.LockXCredits={ready,');
   assert.notEqual(instrumented,source,'Test instrumentation must find the public export.');
   vm.runInContext(instrumented,context,{filename:'credit-wallet.js'});
   await window.LockXCredits.ready;
-  return {events,requests,scripts,listeners,sessions,nodes,window,config,applepay,storage,api:window.__walletTest,async setup(){await window.__walletTest.setupApplePay();},click(){const button=nodes.get('#cwApplePay').children[0];assert.ok(button,'Apple Pay button exists');syncGesture=true;button.onclick();syncGesture=false;return sessions.at(-1);},pick(id){listeners.click({preventDefault(){},target:{closest:()=>({dataset:{pickPack:id}})}});}};
+  return {events,requests,scripts,listeners,sessions,nodes,window,config,applepay,settings,storage,timers,api:window.__walletTest,async setup(){await window.__walletTest.setupApplePay();},click(){const button=nodes.get('#cwApplePay').children.find(el=>el.tag==='apple-pay-button');assert.ok(button,'Apple Pay button exists');syncGesture=true;button.onclick();syncGesture=false;return sessions.at(-1);},pick(id){listeners.click({preventDefault(){},target:{closest:()=>({dataset:{pickPack:id}})}});}};
 }
 
 const tests=[];
@@ -61,8 +62,8 @@ test('Apple Pay container precedes PayPal fallback in the actual rendered wallet
   assert.ok(content.innerHTML.indexOf('id="cwApplePay"')<content.innerHTML.indexOf('id="cwPayPal"'));
 });
 
-test('device or provider ineligibility leaves Apple Pay hidden',async()=>{
-  for(const option of [{canMakePayments:false},{eligible:false}]){const h=await harness(option);await h.setup();assert.equal(h.nodes.get('#cwApplePay').hidden,true);assert.equal(h.nodes.get('#cwApplePay').children.length,0);}
+test('device or provider ineligibility shows truthful status without an Apple Pay button',async()=>{
+  for(const option of [{canMakePayments:false},{eligible:false}]){const h=await harness(option);await h.setup();assert.equal(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'),false);assert.match(h.nodes.get('#cwApplePay').children[0].textContent,/unavailable/);}
 });
 
 test('Apple session begins synchronously and binds the selected 20 or 40 credit pack',async()=>{
@@ -126,6 +127,47 @@ test('concurrent wallet setup shares one PayPal SDK script containing both compo
   const a=h.api.loadPayPalWalletSDK();const b=h.api.loadPayPalWalletSDK();assert.equal(a,b);assert.equal(h.scripts.length,1);
   const url=new URL(h.scripts[0].src);assert.equal(url.origin,'https://www.paypal.com');assert.equal(url.searchParams.get('components'),'applepay,googlepay');
   h.window.paypal={Applepay:()=>h.applepay,Googlepay:()=>({})};h.scripts[0].onload();await Promise.all([a,b]);await h.api.loadPayPalWalletSDK();assert.equal(h.scripts.length,1);
+});
+
+test('wallet refresh failure cannot prevent independent Apple Pay setup',async()=>{
+  const h=await harness({walletThrows:true});h.nodes.set('#cwDialogContent',new Element());h.nodes.set('#cwPayPal',new Element());
+  await h.api.renderWallet();assert.equal(h.scripts.length,1,'Apple SDK starts without waiting for the wallet');await h.setup();assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'));
+});
+
+test('a pending wallet response does not block rendering or Apple Pay',async()=>{
+  const wallet=deferred();const h=await harness({walletPending:wallet.promise});h.nodes.set('#cwDialogContent',new Element());h.nodes.set('#cwPayPal',new Element());
+  await h.api.renderWallet();await h.setup();assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'));wallet.resolve();
+});
+
+test('provider and device ineligibility are checked again on retry without duplicating scripts',async()=>{
+  for(const reason of ['provider','device']){
+    const options=reason==='provider'?{eligible:false}:{canMakePayments:false};const h=await harness(options);await h.setup();assert.equal(h.scripts.length,1);h.settings.isEligible=true;options.canMakePayments=true;
+    const retry=h.nodes.get('#cwApplePay').children.find(el=>el.tag==='button');assert.equal(retry.textContent,'Try Apple Pay again');await retry.onclick();
+    assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'));assert.equal(h.scripts.length,1,'A loaded Apple SDK is reused on eligibility retry');
+  }
+});
+
+test('a configuration error is visible and its retry can render the real Apple button',async()=>{
+  const h=await harness();let calls=0;h.applepay.config=async()=>{if(++calls===1)throw Error('Provider unreachable');return h.settings;};await h.setup();assert.match(h.nodes.get('#cwApplePay').children[0].textContent,/could not load/);
+  await h.nodes.get('#cwApplePay').children.find(el=>el.tag==='button').onclick();assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'));assert.equal(calls,2);
+});
+
+test('provider configuration times out after 15 seconds and retry resets initialization',async()=>{
+  const h=await harness(),configuration=deferred(),started=deferred();h.applepay.config=()=>{started.resolve();return configuration.promise;};
+  const pending=h.setup();await started.promise;assert.equal(h.timers.size,1,'Only the provider configuration deadline remains');const timer=[...h.timers.values()][0];assert.equal(timer.delay,15000);timer.fn();await pending;
+  assert.equal(h.timers.size,0);assert.match(h.nodes.get('#cwApplePay').children[0].textContent,/could not load/);assert.equal(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'),false);
+  h.applepay.config=async()=>h.settings;await h.nodes.get('#cwApplePay').children.find(el=>el.tag==='button').onclick();assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'));assert.equal(h.timers.size,0);assert.equal(h.scripts.length,1,'The loaded SDK is reused after provider timeout');
+  configuration.resolve({isEligible:false});assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'),'A late expired response cannot replace the recovered button');
+});
+
+test('script network error removes the failed element and allows a clean shared retry',async()=>{
+  const h=await harness({manualScripts:true});const url='https://sdk.example.test/payment.js';const first=h.api.loadScript(url).catch(error=>error);h.scripts[0].onerror();const error=await first;assert.match(error.message,/could not load/);assert.equal(h.scripts[0].isConnected,false);assert.equal(h.timers.size,0);
+  const retry=h.api.loadScript(url);assert.equal(h.api.loadScript(url),retry);assert.equal(h.scripts.length,2);h.scripts[1].onload();await retry;assert.equal(h.timers.size,0);
+});
+
+test('script loading times out after 15 seconds and a retry can succeed',async()=>{
+  const h=await harness({manualScripts:true});const url='https://sdk.example.test/slow.js';const first=h.api.loadScript(url).catch(error=>error);const timer=[...h.timers.values()][0];assert.equal(timer.delay,15000);timer.fn();const error=await first;assert.match(error.message,/too long/);assert.equal(h.scripts[0].isConnected,false);
+  const retry=h.api.loadScript(url);assert.equal(h.scripts.length,2);h.scripts[1].onload();await retry;assert.equal(h.timers.size,0);
 });
 
 module.exports=async function run(){const results=[];for(const [name,fn] of tests){try{await fn();results.push({name,status:'PASS'});}catch(error){results.push({name,status:'FAIL',error:error.stack});}}return results;};
