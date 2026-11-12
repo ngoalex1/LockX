@@ -75,7 +75,7 @@ def sync_refunds(owner=None):
             WHERE p.refunded_cents<p.amount_cents
               AND (? IS NULL OR p.owner_id=?)
               AND COALESCE(s.checked,0)<? AND COALESCE(s.attempted,0)<?
-            ORDER BY COALESCE(s.checked,0),p.payment_id LIMIT 10""",
+            ORDER BY COALESCE(s.attempted,0),COALESCE(s.checked,0),p.payment_id LIMIT 10""",
             (owner, owner, now-interval, now-60)).fetchall()
         payments = [dict(row) for row in rows]
         for payment in payments:

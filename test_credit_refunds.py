@@ -1,5 +1,6 @@
 import copy
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -118,3 +119,40 @@ def test_completed_capture_does_not_fetch_refund_order(paid):
     assert refunds.sync_refunds("alice") == 1
     assert len(calls) == 1
     assert wallet_balance() == 2
+
+
+def test_failed_batch_does_not_starve_later_refundable_capture(paid, monkeypatch):
+    _, _, calls = paid
+    poisoned = {f"BADCAPTURE{i:08d}" for i in range(10)}
+    with credits.database() as db:
+        for payment_id in sorted(poisoned):
+            checkout = str(uuid4())
+            db.execute("""INSERT INTO credit_checkouts
+                (id,owner_id,pack_id,amount_cents,credits,provider,status,created,request_key,resource_id)
+                VALUES (?,'alice','starter',100,2,'paypal_link','awaiting_payment',?,?,?)""",
+                (checkout, time.time(), str(uuid4()), "PLB-"+checkout))
+            credits.grant_purchase(db, checkout, payment_id, 100, "USD", "MERCHANT")
+    provider = credits.paypal_call
+    attempted = []
+    def unavailable_for_poisoned(method, path, **kwargs):
+        payment_id = path.rsplit("/", 1)[-1]
+        if payment_id in poisoned:
+            attempted.append(payment_id)
+            raise HTTPException(503, "Unavailable")
+        return provider(method, path, **kwargs)
+    monkeypatch.setattr(credits, "paypal_call", unavailable_for_poisoned)
+    clock = [time.time()]
+    monkeypatch.setattr(refunds, "time", SimpleNamespace(time=lambda: clock[0]))
+
+    assert refunds.sync_refunds() == 0
+    assert set(attempted) == poisoned
+    assert not calls
+    assert wallet_balance() == 22
+
+    # All ten failures are eligible again, as in the next worker sweep.
+    clock[0] += 61
+    assert refunds.sync_refunds() == 1
+    assert wallet_balance() == 21
+    with credits.database() as db:
+        assert db.execute("SELECT refunded_cents FROM credit_payments WHERE payment_id=?",
+                          (CAPTURE,)).fetchone()[0] == 50
