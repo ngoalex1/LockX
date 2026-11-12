@@ -56,12 +56,17 @@ def google_ready():
     return payment_ready() and bool(os.getenv("PAYPAL_GOOGLE_PAY_MERCHANT_ID"))
 
 
+def apple_ready():
+    return payment_ready() and os.getenv("PAYPAL_APPLE_PAY_ENABLED") == "1"
+
+
 def catalog():
     return {
         "credits_required": enabled(), "payment_ready": payment_ready(),
-        "google_pay_ready": google_ready(), "currency": "USD", "credits_per_verification": 1,
+        "google_pay_ready": google_ready(), "apple_pay_ready": apple_ready(),
+        "currency": "USD", "credits_per_verification": 1,
         "packs": [{"id": key, **pack} for key, pack in PACKS.items()],
-        "paypal_client_id": os.getenv("PAYPAL_CLIENT_ID", "") if google_ready() else "",
+        "paypal_client_id": os.getenv("PAYPAL_CLIENT_ID", "") if google_ready() or apple_ready() else "",
         "google_merchant_id": os.getenv("PAYPAL_GOOGLE_PAY_MERCHANT_ID", "") if google_ready() else "",
         "environment": os.getenv("PAYPAL_ENVIRONMENT", "sandbox"),
     }
@@ -224,7 +229,7 @@ def checked_payment_url(value):
 def checkout_view(row):
     return {"id": row["id"], "pack_id": row["pack_id"], "credits": row["credits"],
             "amount_cents": row["amount_cents"], "status": row["status"], "provider": row["provider"],
-            "payment_url": row["payment_url"], "paypal_order_id": row["resource_id"] if row["provider"] == "google_pay" else None}
+            "payment_url": row["payment_url"], "paypal_order_id": row["resource_id"] if row["provider"] in {"google_pay", "apple_pay"} else None}
 
 
 def grant_purchase(db, checkout_id, payment_id, cents, currency, merchant_id):
@@ -281,11 +286,11 @@ def payment_from_order(order):
 class CheckoutCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pack_id: Literal["regular", "frequent", "bulk"]
-    provider: Literal["paypal_link", "google_pay"] = "paypal_link"
+    provider: Literal["paypal_link", "google_pay", "apple_pay"] = "paypal_link"
     request_key: str
 
 
-class GoogleCapture(BaseModel):
+class WalletCapture(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order_id: str
 
@@ -313,7 +318,8 @@ def create_router(authenticate):
     @router.post("/checkouts", status_code=201)
     def create_checkout(data: CheckoutCreate, owner=Depends(authenticate)):
         from lost_found import limited
-        if not payment_ready() or (data.provider == "google_pay" and not google_ready()):
+        if (not payment_ready() or (data.provider == "google_pay" and not google_ready())
+                or (data.provider == "apple_pay" and not apple_ready())):
             raise HTTPException(503, "Credit purchases are not available yet")
         if not re.fullmatch(r"[a-zA-Z0-9_-]{16,80}", data.request_key):
             raise HTTPException(422, "Invalid checkout reference")
@@ -348,14 +354,16 @@ def create_router(authenticate):
             payment_url = next((x.get("href") for x in result.get("links", []) if x.get("rel") == "payment_link"), None)
             payment_url = checked_payment_url(payment_url)
         else:
-            result = paypal_call("POST", "/v2/checkout/orders", request_id=checkout_id, body={
+            order_body = {
                 "intent": "CAPTURE", "purchase_units": [{"reference_id": checkout_id, "custom_id": checkout_id,
                     "payee": {"merchant_id": os.environ["PAYPAL_MERCHANT_ID"]},
                     "description": f"LockX — {pack['credits']} verification credits",
                     "amount": {"currency_code": "USD", "value": amount}}],
                 "application_context": {"shipping_preference": "NO_SHIPPING"},
-                "payment_source": {"google_pay": {"attributes": {"verification": {"method": "SCA_WHEN_REQUIRED"}}}},
-            })
+            }
+            if data.provider == "google_pay":
+                order_body["payment_source"] = {"google_pay": {"attributes": {"verification": {"method": "SCA_WHEN_REQUIRED"}}}}
+            result = paypal_call("POST", "/v2/checkout/orders", request_id=checkout_id, body=order_body)
             payment_url = None
         if not result.get("id"):
             raise HTTPException(503, "PayPal could not create the checkout")
@@ -374,14 +382,14 @@ def create_router(authenticate):
             return JSONResponse(checkout_view(row), headers={"Cache-Control": "private, no-store"})
 
     @router.post("/checkouts/{checkout_id}/capture")
-    def capture_google(checkout_id: str, data: GoogleCapture, owner=Depends(authenticate)):
+    def capture_wallet(checkout_id: str, data: WalletCapture, owner=Depends(authenticate)):
         with database() as db:
             row = db.execute("SELECT * FROM credit_checkouts WHERE id=? AND owner_id=?", (checkout_id, owner)).fetchone()
-            if not row or row["provider"] != "google_pay" or row["resource_id"] != data.order_id:
+            if not row or row["provider"] not in {"google_pay", "apple_pay"} or row["resource_id"] != data.order_id:
                 raise HTTPException(404, "Checkout not found")
             if row["status"] == "paid":
                 return {"status": "paid"}
-        # Only capture a genuine approved Google Pay order, not a client assertion.
+        # Only capture a genuine approved wallet order, not a client assertion.
         details = paypal_call("GET", "/v2/checkout/orders/" + data.order_id)
         if details.get("status") == "APPROVED":
             details = paypal_call("POST", "/v2/checkout/orders/" + data.order_id + "/capture",
@@ -455,7 +463,7 @@ def create_router(authenticate):
                 # Ignore this account's other products; never attach them by amount/email.
                 # Payment Links use their native event above. Processing both
                 # event families could grant a hosted purchase twice.
-                if not db.execute("SELECT 1 FROM credit_checkouts WHERE id=? AND provider='google_pay' AND resource_id=?",
+                if not db.execute("SELECT 1 FROM credit_checkouts WHERE id=? AND provider IN ('google_pay','apple_pay') AND resource_id=?",
                                   (parsed[0], order_id)).fetchone():
                     return {"received": True}
                 grant_purchase(db, *parsed)

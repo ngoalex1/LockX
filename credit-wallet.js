@@ -4,7 +4,7 @@
   const $ = (s, root = document) => root.querySelector(s);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const base = API_BASE + '/credits';
-  let config, authClient, authBoot, balance = null, selected = 'regular', polling, busy = false, googleBoot;
+  let config, authClient, authBoot, balance = null, selected = 'regular', polling, busy = false, googleBoot, appleBoot, paypalBoot, appleSession;
   let lastFocus, waitingCheckout, refreshNumber = 0, googlePurchase;
   const pendingKey = 'lockx.pendingCheckout';
   const attemptKey = 'lockx.checkoutAttempt';
@@ -122,7 +122,8 @@
       <div id="cwMessage" class="cw-message" role="status" hidden></div>
       <div class="cw-pack-picker" role="group" aria-label="Choose your credit pack">${config.packs.map(p=>`<button type="button" data-pick-pack="${p.id}" aria-pressed="${p.id===selected}"><strong>${p.credits} credits</strong><span>${price(p.amount_cents)}</span></button>`).join('')}</div>
       <p class="cw-selected-summary" id="cwSelectedSummary"></p>
-      <button type="button" class="cw-button cw-paypal" id="cwPayPal" ${signed&&config.payment_ready?'':'disabled'}>Continue to payment <span aria-hidden="true">↗</span></button>
+      <div id="cwApplePay" class="cw-apple-pay" hidden></div>
+      <button type="button" class="cw-button cw-paypal" id="cwPayPal" ${signed&&config.payment_ready?'':'disabled'}>PayPal or card <span aria-hidden="true">↗</span></button>
       <p class="cw-methods">PayPal, Apple Pay, and credit or debit card</p><div id="cwGooglePay"></div>
       ${!config.payment_ready?'<p class="cw-availability">Credit purchases are not available yet. No payment will be taken.</p>':''}
       <p class="cw-terms">One-time purchase. Credits never expire. One credit covers one item check, whether the result matches, mismatches, or needs more evidence. Technical failures restore your credit.</p>
@@ -143,6 +144,7 @@
     });
     $('#cwPayPal').onclick=buyPayPal;
     if(signed)await refreshWallet();
+    if(signed&&config.apple_pay_ready)setupApplePay().catch(()=>{});
     if(signed&&config.google_pay_ready)setupGooglePay().catch(()=>{const el=$('#cwGooglePay');if(el)el.textContent='Google Pay is unavailable on this device. You can use the payment options above.';});
   }
   function updatePackSummary() {
@@ -205,10 +207,102 @@
     check();polling=setInterval(check,2500);
   }
   function loadScript(src) { return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=()=>reject(Error('Payment options could not load.'));document.head.append(script);}); }
+  function loadPayPalWalletSDK() {
+    const components=[config.apple_pay_ready?'applepay':null,config.google_pay_ready?'googlepay':null].filter(Boolean);
+    if(components.every(name=>window.paypal?.[name==='applepay'?'Applepay':'Googlepay']))return Promise.resolve();
+    if(!paypalBoot){
+      const url=new URL('https://www.paypal.com/sdk/js');
+      url.search=new URLSearchParams({'client-id':config.paypal_client_id,components:components.join(','),currency:'USD'});
+      paypalBoot=loadScript(url.href).catch(error=>{paypalBoot=null;throw error;});
+    }
+    return paypalBoot;
+  }
+  async function setupApplePay() {
+    const container=$('#cwApplePay');if(!container)return;
+    if(!appleBoot)appleBoot=(async()=>{
+      await Promise.all([loadPayPalWalletSDK(),loadScript('https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js')]);
+      if(!window.ApplePaySession||!ApplePaySession.canMakePayments())return null;
+      const applepay=window.paypal.Applepay();const settings=await applepay.config();
+      return settings.isEligible?{applepay,settings}:null;
+    })().catch(error=>{appleBoot=null;throw error;});
+    const available=await appleBoot;
+    if(!available||!container.isConnected)return;
+    const {applepay,settings}=available;
+    const button=document.createElement('apple-pay-button');
+    button.setAttribute('buttonstyle','black');button.setAttribute('type','buy');button.setAttribute('locale','en-US');
+    button.setAttribute('aria-label','Buy credits with Apple Pay');
+    button.onclick=()=>{
+      if(busy)return;
+      const p=pack();if(!p)return;
+      const attempt=checkoutAttempt('apple_pay',p.id);
+      let session,checkout,cancelled=false,captureStarted=false,captured=false;
+      const finish=()=>{
+        if(appleSession!==session)return;
+        appleSession=null;busy=false;container.classList.remove('cw-wallet-busy');button.removeAttribute('aria-disabled');
+      };
+      const complete=status=>{try{session.completePayment(status);}catch{}finally{finish();}};
+      try{
+        // Apple requires session creation and begin() inside this user gesture.
+        const total={label:'LockX — '+p.credits+' verification credits',type:'final',amount:(p.amount_cents/100).toFixed(2)};
+        session=new ApplePaySession(4,{countryCode:settings.countryCode,currencyCode:'USD',
+          merchantCapabilities:settings.merchantCapabilities,supportedNetworks:settings.supportedNetworks,
+          requiredBillingContactFields:['postalAddress'],
+          total});
+        appleSession=session;busy=true;container.classList.add('cw-wallet-busy');button.setAttribute('aria-disabled','true');
+        session.oncancel=()=>{
+          cancelled=true;
+          // Once capture starts, wait for its result before allowing another charge.
+          if(captureStarted)return;
+          finish();save(attemptKey,null);
+          if(checkout&&waitingCheckout===checkout.id){waitingCheckout=null;save(pendingKey,null);}
+        };
+        session.onpaymentmethodselected=()=>{
+          if(!cancelled&&appleSession===session)session.completePaymentMethodSelection({newTotal:total});
+        };
+        session.onvalidatemerchant=async event=>{
+          try{
+            const result=await applepay.validateMerchant({validationUrl:event.validationURL,displayName:'LockX'});
+            if(!cancelled&&appleSession===session)session.completeMerchantValidation(result.merchantSession);
+          }catch{
+            if(appleSession!==session)return;
+            try{session.abort();}catch{}finally{finish();}
+            message('Apple Pay could not connect. Please try again or use PayPal or card.',true);
+          }
+        };
+        session.onpaymentauthorized=async event=>{
+          try{
+            if(cancelled||appleSession!==session)return;
+            checkout=await post('/checkouts',{pack_id:attempt.packId,provider:'apple_pay',request_key:attempt.key});
+            if(cancelled||appleSession!==session)return;
+            if(checkout.status!=='paid'){
+              waitingCheckout=checkout.id;save(pendingKey,checkout.id);
+              const confirmation=await applepay.confirmOrder({orderId:checkout.paypal_order_id,token:event.payment.token,billingContact:event.payment.billingContact});
+              if(cancelled||appleSession!==session)return;
+              if(confirmation.status&&confirmation.status!=='APPROVED')throw Error('Apple Pay has not approved this payment.');
+              captureStarted=true;
+              await post('/checkouts/'+checkout.id+'/capture',{order_id:checkout.paypal_order_id});
+            }
+            captured=true;
+            if(!cancelled)complete(ApplePaySession.STATUS_SUCCESS);else finish();
+            waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);
+            await refreshWallet();message(`${checkout.credits} credits added. You’re ready to verify.`);
+          }catch(error){
+            if(appleSession===session){if(!cancelled)complete(ApplePaySession.STATUS_FAILURE);else finish();}
+            if(cancelled&&!captureStarted)return;
+            message(captured?'Payment confirmed. Refresh your wallet to see your credits.':checkout?'Payment confirmation is incomplete. Check your credits before trying again.':'Apple Pay could not complete the payment. Please try again.',!captured);
+            if(checkout)watchCheckout(checkout.id);
+          }
+        };
+        session.begin();
+      }catch{
+        finish();message('Apple Pay could not open on this device. Please use PayPal or card.',true);
+      }
+    };
+    container.replaceChildren(button);container.hidden=false;
+  }
   async function setupGooglePay() {
     if(!googleBoot)googleBoot=(async()=>{
-      const url=new URL('https://www.paypal.com/sdk/js');url.search=new URLSearchParams({'client-id':config.paypal_client_id,components:'googlepay',currency:'USD'});
-      await Promise.all([window.google?.payments?Promise.resolve():loadScript('https://pay.google.com/gp/p/js/pay.js'),window.paypal?.Googlepay?Promise.resolve():loadScript(url.href)]);
+      await Promise.all([window.google?.payments?Promise.resolve():loadScript('https://pay.google.com/gp/p/js/pay.js'),loadPayPalWalletSDK()]);
       const paypalGoogle=window.paypal.Googlepay();const settings=await paypalGoogle.config();
       const googleClient=new google.payments.api.PaymentsClient({environment:config.environment==='live'?'PRODUCTION':'TEST',paymentDataCallbacks:{onPaymentAuthorized:async data=>{
         try{

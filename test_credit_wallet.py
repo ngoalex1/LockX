@@ -38,6 +38,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PAYPAL_MERCHANT_ID", "MERCHANT")
     monkeypatch.setenv("PAYPAL_WEBHOOK_ID", "test-webhook")
     monkeypatch.setenv("LOCKX_PAYPAL_LINKS_VALIDATED", "1")
+    monkeypatch.delenv("PAYPAL_APPLE_PAY_ENABLED", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(in_hand, "prepare_reference_features", lambda *_: None)
     monkeypatch.setattr(in_hand, "prepare_scan", lambda *_: None)
@@ -246,8 +247,9 @@ def test_unverified_webhook_never_adds_credits(client,monkeypatch):
     assert balance(client)==0
 
 
-def test_verified_capture_resolves_server_order_and_adds_exact_pack(client,monkeypatch):
-    identifier=checkout(provider="google_pay")
+@pytest.mark.parametrize("wallet_provider", ["google_pay", "apple_pay"])
+def test_verified_capture_resolves_server_order_and_adds_exact_pack(client,monkeypatch,wallet_provider):
+    identifier=checkout(provider=wallet_provider)
     with credits.database() as db:
         db.execute("UPDATE credit_checkouts SET resource_id='ORDER123456789' WHERE id=?", (identifier,))
     order={"purchase_units":[{"custom_id":identifier,"payee":{"merchant_id":"MERCHANT"},
@@ -306,8 +308,9 @@ def test_native_link_confirmation_rejects_wrong_payment(client,monkeypatch,chang
     assert balance(client)==0
 
 
-def test_native_link_confirmation_ignores_other_resources_and_google_orders(client,monkeypatch):
-    identifier=checkout(provider="google_pay")
+@pytest.mark.parametrize("wallet_provider", ["google_pay", "apple_pay"])
+def test_native_link_confirmation_ignores_other_resources_and_wallet_orders(client,monkeypatch,wallet_provider):
+    identifier=checkout(provider=wallet_provider)
     monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"verification_status":"SUCCESS"})
     for ref in [identifier,str(uuid4())]:
         assert client.post("/api/v1/credits/paypal/webhook",json=native_link_event(ref),headers=notification_headers()).status_code==200
@@ -387,8 +390,9 @@ def test_refund_before_capture_is_retried_then_applied_once(client,monkeypatch):
     assert balance(client)==0
 
 
-def test_google_pay_capture_is_owner_scoped_and_requires_completed_payment(client,monkeypatch):
-    identifier=checkout(provider="google_pay")
+@pytest.mark.parametrize("wallet_provider", ["google_pay", "apple_pay"])
+def test_wallet_capture_is_owner_scoped_and_requires_completed_payment(client,monkeypatch,wallet_provider):
+    identifier=checkout(provider=wallet_provider)
     order_id="ORDER123456789"
     with credits.database() as db:
         db.execute("UPDATE credit_checkouts SET resource_id=? WHERE id=?",(order_id,identifier))
@@ -403,20 +407,98 @@ def test_google_pay_capture_is_owner_scoped_and_requires_completed_payment(clien
     endpoint="/api/v1/credits/checkouts/"+identifier+"/capture"
     body={"order_id":order_id}
     assert client.post(endpoint,json=body,headers={"Authorization":"Bearer bob"}).status_code==404
+    assert client.post(endpoint,json={"order_id":"OTHERORDER12345"},headers={"Authorization":"Bearer alice"}).status_code==404
     assert not calls
     assert client.post(endpoint,json=body,headers={"Authorization":"Bearer alice"}).status_code==200
     assert client.post(endpoint,json=body,headers={"Authorization":"Bearer alice"}).status_code==200
     assert len(calls)==2 and balance(client)==10
 
 
-def test_pending_google_pay_order_cannot_grant_credits(client,monkeypatch):
-    identifier=checkout(provider="google_pay")
+@pytest.mark.parametrize("wallet_provider", ["google_pay", "apple_pay"])
+def test_pending_wallet_order_cannot_grant_credits(client,monkeypatch,wallet_provider):
+    identifier=checkout(provider=wallet_provider)
     with credits.database() as db:
         row=db.execute("SELECT resource_id FROM credit_checkouts WHERE id=?",(identifier,)).fetchone()
         order_id=row["resource_id"]
     monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"status":"CREATED","purchase_units":[{}]})
     response=client.post("/api/v1/credits/checkouts/"+identifier+"/capture",json={"order_id":order_id},headers={"Authorization":"Bearer alice"})
     assert response.status_code==409 and balance(client)==0
+
+
+def test_apple_pay_requires_explicit_enablement_and_catalog_exposes_only_public_client_id(client,monkeypatch):
+    monkeypatch.delenv("PAYPAL_GOOGLE_PAY_MERCHANT_ID", raising=False)
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:pytest.fail("Disabled Apple Pay reached PayPal"))
+    disabled=client.get("/api/v1/credits/catalog").json()
+    assert disabled["apple_pay_ready"] is False and disabled["paypal_client_id"]==""
+    assert client.post("/api/v1/credits/checkouts",headers={"Authorization":"Bearer alice"},
+        json={"pack_id":"bulk","provider":"apple_pay","request_key":str(uuid4())}).status_code==503
+    monkeypatch.setenv("PAYPAL_APPLE_PAY_ENABLED","1")
+    ready=client.get("/api/v1/credits/catalog").json()
+    assert ready["apple_pay_ready"] is True and ready["google_pay_ready"] is False
+    assert ready["paypal_client_id"]=="test-client"
+    assert "test-secret" not in json.dumps(ready) and "test-webhook" not in json.dumps(ready)
+    monkeypatch.setenv("LOCKX_CREDITS_ENABLED","0")
+    off=client.get("/api/v1/credits/catalog").json()
+    assert off["apple_pay_ready"] is False and off["paypal_client_id"]==""
+
+
+@pytest.mark.parametrize("wallet_provider", ["google_pay", "apple_pay"])
+def test_wallet_order_creation_uses_server_owned_bulk_pack_and_stable_request_id(client,monkeypatch,wallet_provider):
+    monkeypatch.setenv("PAYPAL_APPLE_PAY_ENABLED","1")
+    monkeypatch.setenv("PAYPAL_GOOGLE_PAY_MERCHANT_ID","test-google-merchant")
+    calls=[]
+    def provider(method,path,**kwargs):
+        calls.append((method,path,kwargs))
+        return {"id":"ORDER123456789"}
+    monkeypatch.setattr(credits,"paypal_call",provider)
+    body={"pack_id":"bulk","provider":wallet_provider,"request_key":str(uuid4())}
+    endpoint="/api/v1/credits/checkouts"
+    headers={"Authorization":"Bearer alice"}
+    assert client.post(endpoint,json={**body,"amount_cents":1},headers=headers).status_code==422
+    assert not calls
+    response=client.post(endpoint,json=body,headers=headers)
+    assert response.status_code==201,response.text
+    result=response.json()
+    again=client.post(endpoint,json=body,headers=headers)
+    assert again.json()==result and len(calls)==1
+    assert calls[0][:2]==("POST","/v2/checkout/orders")
+    order=calls[0][2]["body"]
+    unit=order["purchase_units"][0]
+    assert order["intent"]=="CAPTURE"
+    assert unit["amount"]=={"currency_code":"USD","value":"20.00"}
+    assert unit["payee"]=={"merchant_id":"MERCHANT"}
+    assert unit["custom_id"]==unit["reference_id"]==result["id"]
+    assert calls[0][2]["request_id"]==result["id"]
+    if wallet_provider=="apple_pay":
+        assert "payment_source" not in order
+    else:
+        assert order["payment_source"]=={"google_pay":{"attributes":{"verification":{"method":"SCA_WHEN_REQUIRED"}}}}
+    assert result["paypal_order_id"]=="ORDER123456789" and result["payment_url"] is None
+    assert result["credits"]==40 and result["amount_cents"]==2000
+    assert balance(client)==0
+
+
+@pytest.mark.parametrize("mismatch", ["amount", "currency", "merchant", "checkout_reference"])
+def test_apple_pay_capture_rejects_mismatched_provider_payment(client,monkeypatch,mismatch):
+    identifier=checkout(provider="apple_pay")
+    order_id="APPLEORDER12345"
+    with credits.database() as db:
+        db.execute("UPDATE credit_checkouts SET resource_id=? WHERE id=?",(order_id,identifier))
+    unit={"custom_id":identifier,"payee":{"merchant_id":"MERCHANT"},
+        "payments":{"captures":[{"id":"APPLECAPTURE123","status":"COMPLETED",
+            "amount":{"currency_code":"USD","value":"5.00"}}]}}
+    if mismatch=="amount": unit["payments"]["captures"][0]["amount"]["value"]="0.01"
+    if mismatch=="currency": unit["payments"]["captures"][0]["amount"]["currency_code"]="EUR"
+    if mismatch=="merchant": unit["payee"]["merchant_id"]="OTHER"
+    if mismatch=="checkout_reference": unit["custom_id"]=str(uuid4())
+    def provider(method,path,**kwargs):
+        assert (method,path)==("GET","/v2/checkout/orders/"+order_id)
+        return {"id":order_id,"status":"COMPLETED","purchase_units":[unit]}
+    monkeypatch.setattr(credits,"paypal_call",provider)
+    response=client.post("/api/v1/credits/checkouts/"+identifier+"/capture",
+        json={"order_id":order_id},headers={"Authorization":"Bearer alice"})
+    assert response.status_code==400
+    assert balance(client)==0
 
 
 def test_payment_link_sku_is_resolved_when_paypal_supplies_default_reference(client):
