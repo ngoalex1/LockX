@@ -23,6 +23,14 @@ body.lockx-public .lx-public-header {
 }
 body.lockx-public .lx-wordmark { color: var(--lx-ink); }
 body.lockx-public .lx-wordmark span { color: var(--lx-action); }
+body.lockx-public .lx-wordmark .lx-brand-credit {
+  display: block;
+  margin-top: 4px;
+  color: var(--lx-muted);
+  font: 500 10px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  letter-spacing: .1px;
+  white-space: nowrap;
+}
 body.lockx-public .lx-header-links button { color: var(--lx-muted); min-height: 44px; }
 body.lockx-public .lx-header-links button:hover { color: var(--lx-action); }
 body.lockx-public .lx-header-cta,
