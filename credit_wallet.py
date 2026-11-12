@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
@@ -92,6 +92,9 @@ def schema(db):
            owner_id TEXT NOT NULL REFERENCES credit_wallets(owner_id),
            state TEXT NOT NULL DEFAULT 'new', parent_request_id TEXT, updated REAL NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS credit_ledger_owner ON credit_ledger(owner_id,created)",
+        """CREATE TABLE IF NOT EXISTS credit_payment_sync (
+           payment_id TEXT PRIMARY KEY REFERENCES credit_payments(payment_id),
+           checked REAL NOT NULL DEFAULT 0, attempted REAL NOT NULL DEFAULT 0)""",
     ):
         db.execute(statement)
 
@@ -295,7 +298,9 @@ def create_router(authenticate):
         return JSONResponse(catalog(), headers={"Cache-Control": "no-store"})
 
     @router.get("/wallet")
-    def get_wallet(owner=Depends(authenticate)):
+    def get_wallet(background: BackgroundTasks, owner=Depends(authenticate)):
+        from credit_refunds import sync_refunds
+        background.add_task(sync_refunds, owner)
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             reconcile(db, owner)
