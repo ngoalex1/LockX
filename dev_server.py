@@ -14,8 +14,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 ROOT = Path(__file__).resolve().parent
 os.environ["LOCKX_DATA_DIR"] = str(ROOT / ".lockx-data" / "preview")
 # Preview must not silently use live messaging or paid analysis credentials.
-for key in ("TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID", "LOCKX_MMS_NUMBER", "OPENAI_API_KEY"):
+for key in ("TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID", "LOCKX_MMS_NUMBER", "OPENAI_API_KEY", "PAYPAL_CLIENT_SECRET", "PAYPAL_CLIENT_ID", "PAYPAL_WEBHOOK_ID", "PAYPAL_MERCHANT_ID"):
     os.environ.pop(key, None)
+
+os.environ["LOCKX_CREDITS_ENABLED"] = "0"
 
 from main import app, current_user as who, authenticated_identity
 from lost_found import database, match_sighting, now
@@ -32,12 +34,21 @@ app.dependency_overrides[authenticated_identity] = lambda: {"id":"local-preview-
 @app.get("/", response_class=HTMLResponse)
 def index():
     html = (ROOT / "index.html").read_text()
-    return HTMLResponse(html.replace('<script src="app.js', '<script>window.LOCKX_LOCAL_PREVIEW=true;window.LOCKX_API_BASE="/api/v1";</script><script src="app.js'),headers={"Cache-Control":"no-store"})
+    return HTMLResponse(html.replace('<script src="app.js', '<script>window.LOCKX_LOCAL_PREVIEW=true;window.LOCKX_CREDITS_PREVIEW=true;window.LOCKX_API_BASE="/api/v1";</script><script src="app.js'),headers={"Cache-Control":"no-store"})
+
+
+@app.get("/assets/{asset}")
+def public_asset(asset: str):
+    path=(ROOT / "assets" / asset).resolve()
+    if path.parent != (ROOT / "assets").resolve() or path.suffix.lower() not in {".png",".jpg",".jpeg",".webp",".svg"} or not path.is_file():
+        from fastapi import HTTPException
+        raise HTTPException(404)
+    return FileResponse(path,headers={"Cache-Control":"no-store"})
 
 
 @app.get("/{asset}")
 def asset(asset: str):
-    if asset not in {"app.js", "styles.css", "lost-found.js", "lost-found.css", "landing.css", "landing-asset.css", "lockx-city-watch-hero.png", "in-hand.js", "in-hand.css", "in-hand-capture.js"}:
+    if asset not in {"app.js", "styles.css", "lost-found.js", "lost-found.css", "landing.css", "landing-asset.css", "lockx-city-watch-hero.png", "in-hand.js", "in-hand.css", "in-hand-capture.js", "landing-inhand.js", "landing-inhand.css", "rose-walnut.css", "landing-steps.css", "credit-wallet.js", "credit-wallet.css"}:
         from fastapi import HTTPException
         raise HTTPException(404)
     return FileResponse(ROOT / asset,headers={"Cache-Control":"no-store"})

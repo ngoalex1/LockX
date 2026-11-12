@@ -35,7 +35,10 @@
   async function api(path, options = {}, auth = false) {
     const headers = new Headers(options.headers || {});
     if (auth) {
-      if(managementKey)headers.set('X-LockX-Manage-Key',managementKey);
+      const walletAuthorization = await window.LockXCredits?.authorization();
+      if(path==='/requests' && options.method==='POST' && walletAuthorization)headers.set('Authorization',walletAuthorization);
+      else if(managementKey)headers.set('X-LockX-Manage-Key',managementKey);
+      else if(walletAuthorization)headers.set('Authorization',walletAuthorization);
       else headers.set('X-LockX-Guest-Key',browserAccess.key);
     }
     const r = await fetch(base + path, {...options, headers});
@@ -85,7 +88,7 @@
     $('#ihPhotoInput').onchange = addPhotos;
     $('#ihRequestForm').onsubmit = createRequest;
     $('#ihRefresh').onclick = loadRequests;
-    renderPhotos(); loadRequests();
+    renderPhotos(); loadRequests(); window.LockXCredits?.decorate();
   }
   function serviceState() {
     const el=$('#ihServiceState');if(!el)return;
@@ -150,6 +153,7 @@
     if (!selected.length) { errorAt('#ihCreateError',Error('Select at least one photo to verify.')); return; }
     button.disabled = true; button.textContent = 'Creating your link…'; $('#ihCreateError').hidden = true;
     try {
+      await window.LockXCredits?.ensureForVerification();
       const payload = {title:'Photo verification', consent:true, auto_publish:true, publish_matched_photos:true};
       const body = new FormData(); body.append('payload',JSON.stringify(payload)); selected.forEach((p,i)=>body.append('photos',p.blob,`reference-${i+1}.jpg`));
       const record = await (await api('/requests',{method:'POST',body},true)).json();

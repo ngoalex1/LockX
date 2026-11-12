@@ -45,6 +45,33 @@ function lockxSitePage() {
   if(['vault','cases','matches','alerts','monitoring','sources','lost-found','found','caseDetail','vaultDetail'].includes(hash))return hash==='found'?'lost-found':hash;
   return 'landing';
 }
+
+// A single auth client is shared by credit purchases and the private workspace.
+let lockxAuthBoot = null;
+function ensureLockXAuthClient() {
+  if (window.LOCKX_LOCAL_PREVIEW) return Promise.resolve({auth:{
+    getSession:async()=>({data:{session:null}}),
+    signInWithOtp:async()=>({error:Error('Local preview: email delivery and real purchases are disabled.')}),
+    signOut:async()=>({error:null})
+  }});
+  if (!lockxAuthBoot) lockxAuthBoot = (async () => {
+    if (!window.supabase) await new Promise((resolve,reject) => {
+      const script=document.createElement('script');
+      script.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+      script.onload=resolve; script.onerror=()=>reject(Error('Sign-in could not load. Please try again.'));
+      document.head.append(script);
+    });
+    client=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    session=(await client.auth.getSession()).data.session;
+    client.auth.onAuthStateChange((_event,next)=>{
+      session=next;window.dispatchEvent(new Event('lockx-session'));
+    });
+    return client;
+  })().catch(error=>{lockxAuthBoot=null;throw error;});
+  return lockxAuthBoot;
+}
+window.ensureLockXAuthClient=ensureLockXAuthClient;
+
 let lockxLegacyBoot=null;
 async function lockxSiteRoute() {
   const requested=lockxSitePage();
@@ -274,7 +301,7 @@ async function refresh(){vaultLoadError='';await loadSources();if(!session){case
 
 document.addEventListener('click',event=>{const page=event.target.closest('[data-page]');if(page){const target=page.dataset.page==='dashboard'?'landing':page.dataset.page;if(location.hash!=='#'+target)location.hash=target;else go(target);return;}const button=event.target.closest('[data-action]');if(!button)return;const record=cases.find(item=>item.id===button.dataset.id), vaultItem=vaultItems.find(item=>item.id===button.dataset.id);switch(button.dataset.action){case'close-auth':$('#authModal').classList.remove('open');break;case'new':openCase();break;case'signin':openAuth();break;case'start-recovery':if(session){openCase();}else{openAuth();}break;case'signout':signOut();break;case'detail':activeCaseId=button.dataset.id;go('caseDetail');break;case'edit':openCase(record);break;case'add-photo':openCase(record,true);break;case'remove-photo':removePhoto(button.dataset.case,button.dataset.photo);break;case'delete-case':deleteCase(button.dataset.id);break;case'scan':runScan(button.dataset.id);break;case'close':$('#caseModal').classList.remove('open');break;case'confirm-vault':finishVaultConfirmation(true);break;case'cancel-vault-confirm':finishVaultConfirmation(false);break;case'retry-vault':refresh();break;case'recover-vault-item':markVaultRecovered(button.dataset.id);break;case'close-vault-recovery':$('#vaultRecoveryModal').classList.remove('open');break;case'new-vault-item':openVaultItem();break;case'vault-detail':activeVaultId=button.dataset.id;go('vaultDetail');break;case'edit-vault-item':openVaultItem(vaultItem);break;case'choose-vault-photos':$('#vaultPhotoInput').click();break;case'add-vault-photo':addVaultPhotos(button.dataset.id);break;case'remove-vault-photo':removeVaultPhoto(button.dataset.item,button.dataset.photo);break;case'add-vault-document':addVaultDocument(button.dataset.id);break;case'transfer-vault-item':openTransfer(vaultItem);break;case'start-vault-recovery':startVaultRecovery(button.dataset.id);break;case'accept-transfer':acceptTransfer(button.dataset.transfer);break;case'cancel-transfer':cancelTransfer(button.dataset.transfer);break;case'close-vault':$('#vaultModal').classList.remove('open');break;case'close-transfer':$('#transferModal').classList.remove('open');break;}});
 document.addEventListener('keydown',event=>{const card=event.target.closest('[data-action="detail"],[data-action="vault-detail"]');if(card&&(event.key==='Enter'||event.key===' ')){event.preventDefault();card.click();}if(event.key==='Escape'){$('#authModal')?.classList.remove('open');finishVaultConfirmation(false);$('#caseModal')?.classList.remove('open');$('#vaultModal')?.classList.remove('open');$('#transferModal')?.classList.remove('open');$('#vaultRecoveryModal')?.classList.remove('open');}});
-async function initLegacyWorkspace(){if(location.protocol==='file:'){render();return;}if(window.LOCKX_LOCAL_PREVIEW){session={access_token:'local-preview',user:{email:'Local preview'}};render();go(location.hash.startsWith('#in-hand')?'in-hand':'lost-found');return;}setupCaseModal();setupVaultModal();ensureDetail();ensureVaultDetail();$('#transferForm').addEventListener('submit',saveTransfer);$('#vaultRecoveryForm').addEventListener('submit',submitVaultRecovery);try{await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';script.onload=resolve;script.onerror=reject;document.head.append(script);});client=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);session=(await client.auth.getSession()).data.session;client.auth.onAuthStateChange((_event,next)=>{session=next;window.dispatchEvent(new Event('lockx-session'));});await refresh();go(location.hash.startsWith('#in-hand')?'in-hand':['#lost-found','#found'].includes(location.hash)?'lost-found':session?'dashboard':'landing');}catch{if(location.hash.startsWith('#in-hand')){go('in-hand');return;}go(['#lost-found','#found'].includes(location.hash)?'lost-found':'landing');toast('Workspace unavailable','LockX could not initialize securely. Refresh and try again.');}}
+async function initLegacyWorkspace(){if(location.protocol==='file:'){render();return;}if(window.LOCKX_LOCAL_PREVIEW){session={access_token:'local-preview',user:{email:'Local preview'}};render();go(location.hash.startsWith('#in-hand')?'in-hand':'lost-found');return;}setupCaseModal();setupVaultModal();ensureDetail();ensureVaultDetail();$('#transferForm').addEventListener('submit',saveTransfer);$('#vaultRecoveryForm').addEventListener('submit',submitVaultRecovery);try{await ensureLockXAuthClient();await refresh();go(location.hash.startsWith('#in-hand')?'in-hand':['#lost-found','#found'].includes(location.hash)?'lost-found':session?'dashboard':'landing');}catch{if(location.hash.startsWith('#in-hand')){go('in-hand');return;}go(['#lost-found','#found'].includes(location.hash)?'lost-found':'landing');toast('Workspace unavailable','LockX could not initialize securely. Refresh and try again.');}}
 init();
 
 document.addEventListener('click',event=>{const menu=event.target.closest('.mobile-menu');if(menu){const expanded=$('.sidebar')?.classList.toggle('open');menu.setAttribute('aria-expanded',String(Boolean(expanded)));}else if(!event.target.closest('.sidebar')){$('.sidebar')?.classList.remove('open');$('.mobile-menu')?.setAttribute('aria-expanded','false');}});

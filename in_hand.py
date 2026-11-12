@@ -33,6 +33,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from PIL import Image, ImageDraw, ImageFont
 from lost_found import MAX_IMAGE, clean_photo, limited
+import credit_wallet as credits
 
 log = logging.getLogger("lockx.in_hand")
 MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 6, 60 * 1024 * 1024, 4
@@ -414,6 +415,7 @@ def location_capture_active(db, row, session_id):
 
 
 def view(db, row, private=False):
+    credits.settle_check(db, row["id"])
     listing = json.loads(row["listing"])
     media = [dict(m) for m in db.execute("SELECT id,role,mime,sha256,seconds,label FROM ih_media WHERE request_id=? ORDER BY rowid", (row["id"],))]
     result = {"id": row["id"], **{k:v for k,v in listing.items() if k != "consent" and (k != "auto_publish" or v is True)},
@@ -546,6 +548,7 @@ def cleanup_scan_media(db, now):
         analysis = json.loads(row["analysis"] or "{}")
         analysis.update(result="inconclusive",summary="The recording was received, but processing was interrupted. Please make a fresh inspection.")
         db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?", (json.dumps(analysis),row["id"]))
+        credits.settle_check(db,row["id"])
         db.execute("UPDATE ih_scan_sessions SET upload_status='failed' WHERE session_id=?", (row["session_id"],))
         db.execute("DELETE FROM ih_scan_chunks WHERE session_id=?", (row["session_id"],))
         db.execute("DELETE FROM ih_scan_previews WHERE session_id=?", (row["session_id"],))
@@ -934,6 +937,7 @@ def finish_scan_background(request_id, session_id):
                 analysis = json.loads(row["analysis"] or "{}")
                 analysis.update(result="inconclusive",summary="The recording was received, but it could not be processed as a complete camera scan. Please create a fresh inspection.")
                 db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?",(json.dumps(analysis),request_id))
+                credits.settle_check(db,request_id)
             db.execute("UPDATE ih_scan_sessions SET upload_status='failed' WHERE session_id=?",(session_id,))
             db.execute("DELETE FROM ih_scan_chunks WHERE session_id=?",(session_id,))
             db.execute("DELETE FROM ih_scan_previews WHERE session_id=?",(session_id,))
@@ -1150,6 +1154,7 @@ def analyze(request_id):
         analysis.update(summary="Your recording is ready to review. Automated photo comparison is unavailable; an individual-item match has not been established.", result="inconclusive")
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='unavailable',analysis=? WHERE id=?", (json.dumps(analysis), request_id))
+            credits.settle_check(db,request_id)
         return
     try:
         listing = json.loads(row["listing"])
@@ -1227,6 +1232,7 @@ def analyze(request_id):
         analysis["video"]["analysis_ms"] = round((perf_counter()-analysis_started)*1000,2)
         with database() as db:
             db.execute("UPDATE ih_requests SET status=?,analysis_status='complete',analysis=? WHERE id=?", (result,json.dumps(analysis),request_id))
+            credits.settle_check(db,request_id)
             event(db, request_id, "Selected photos and written claims compared with server-extracted video frames")
             completed = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
             eligibility = photo_eligibility(db,completed)
@@ -1247,6 +1253,7 @@ def analyze(request_id):
         analysis.update(result="inconclusive",summary="The recording is preserved, but the automated comparison could not be completed.")
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?", (json.dumps(analysis),request_id))
+            credits.settle_check(db,request_id)
     except Exception:
         if preparation is not None:
             preparation.close()
@@ -1818,6 +1825,11 @@ def create_router(authenticate):
     router = APIRouter(prefix="/api/v1/in-hand", tags=["In-hand confirmed"])
 
     def creator(request: Request):
+        if credits.enabled():
+            authorization = request.headers.get("Authorization")
+            if not authorization:
+                raise HTTPException(401,"Sign in with your email to use your credits")
+            return authenticate(authorization)
         guest_key = request.headers.get("X-LockX-Guest-Key")
         if guest_key:
             return "guest:" + access_digest(guest_key)
@@ -1845,7 +1857,7 @@ def create_router(authenticate):
     def capabilities():
         return {"visual_comparison_ready":visual_ready(),"max_photos":MAX_PHOTOS,"max_photo_mb":5,"max_video_mb":60,"minimum_stage_seconds":STAGE_SECONDS,"camera_only":True,
                 "continuous_scan":True,"min_capture_seconds":SCAN_MIN_SECONDS,"max_capture_seconds":SCAN_MAX_SECONDS,
-                "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10}
+                "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10,"credits_required":credits.enabled()}
 
     @router.post("/requests/{request_id}/publish",status_code=201)
     def publish(request_id: str, data: Publication, owner=Depends(access)):
@@ -1925,6 +1937,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)", (request_id,owner,secrets.token_urlsafe(32),listing.model_dump_json(),created,created+86400,json.dumps(make_plan(listing,len(photos)))))
             db.execute("INSERT INTO ih_access_keys VALUES (?,?)",(request_id,access_digest(management_key)))
+            credits.bind_check(db,request_id,owner)
             for i,photo in enumerate(photos):
                 store_media(db,request_id,"listing","image/jpeg",photo,label=f"Reference photo {i+1}")
             event(db, request_id, "Selected listing photos and description preserved")
@@ -2007,6 +2020,7 @@ def create_router(authenticate):
             for media in references:
                 store_media(db,request_id,"listing",media["mime"],media["content"],media["seconds"],media["label"])
             db.execute("INSERT INTO ih_capture_retries VALUES (?,?,?)",(row["id"],request_id,reason))
+            credits.bind_quality_retry(db,row["id"],request_id)
             event(db,request_id,"Fresh quality retry created; original photos and consent preserved")
         background.add_task(prepare_reference_features,request_id)
         return {"id":request_id,"token":child_token,"capture_retry_reason":reason}
@@ -2322,6 +2336,7 @@ def create_router(authenticate):
                                      "partial_capture":not complete and not fixed_video})
                 db.execute("UPDATE ih_sessions SET observations=?,finished=COALESCE(finished,?),position=? WHERE id=?",
                            (json.dumps(observations),time.time(),1 if fixed_video else sess["position"],data.session_id))
+            credits.reserve_check(db,row["id"])
             store_media(db,row["id"],"video",mime,content)
             analysis = {"result":"inconclusive","summary":"Recording received. Checking every selected photo and listing claim."}
             db.execute("UPDATE ih_requests SET status='processing',submitted=?,analysis_status='decoding',analysis=? WHERE id=?",(time.time(),json.dumps(analysis),row["id"]))
@@ -2432,6 +2447,7 @@ def create_router(authenticate):
             digest = hashlib.sha256(content).hexdigest()
             if db.execute("SELECT 1 FROM ih_media WHERE role='video' AND sha256=?",(digest,)).fetchone():
                 raise HTTPException(409,"This exact recording was already used. Make a fresh recording.")
+            credits.reserve_check(db,row["id"])
             store_media(db,row["id"],"video",mime,content)
             for seconds,photo,label in frames:
                 store_media(db,row["id"],"frame","image/jpeg",photo,seconds,label)
@@ -2474,6 +2490,8 @@ def create_router(authenticate):
                 raise HTTPException(409,"This inspection is not ready for another comparison")
             if not visual_ready():
                 raise HTTPException(503,"Automated comparison is currently unavailable")
+            db.execute("BEGIN IMMEDIATE")
+            credits.reserve_check(db,request_id)
             db.execute("UPDATE ih_requests SET status='processing',analysis_status='pending' WHERE id=?",(request_id,))
         background.add_task(analyze,request_id)
         return {"status":"processing"}
