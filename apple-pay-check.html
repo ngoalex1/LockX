@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>LockX Apple Pay check</title>
+  <style>
+    body{margin:0;background:#faf1eb;color:#342826;font:16px/1.55 system-ui,sans-serif}main{max-width:620px;margin:8vh auto;padding:28px}h1{font:38px/1.15 Georgia,serif}p{color:#765e60}dl{padding:20px;border:1px solid #ddc6c0;border-radius:16px;background:#fffcf7}dt{font-weight:600;margin-top:16px}dt:first-child{margin-top:0}dd{margin:4px 0 0;overflow-wrap:anywhere}button,a{display:inline-block;padding:12px 20px;border-radius:24px;border:1px solid #7b414b;background:#7b414b;color:#fffaf7;text-decoration:none;font:inherit;margin:8px 8px 0 0}button:disabled{opacity:.5}pre{font:12px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+  </style>
+</head>
+<body><main>
+  <h1>Apple Pay check</h1>
+  <p>This checks your browser and PayPal eligibility. It does not create an order or take a payment.</p>
+  <dl id="results" aria-live="polite"></dl>
+  <button id="retry" type="button">Run again</button><a href="/">Back to LockX</a>
+  <pre id="summary"></pre>
+</main>
+<script>
+(() => {
+  'use strict';
+  const results=document.querySelector('#results'),summary=document.querySelector('#summary'),retry=document.querySelector('#retry');
+  const state={};
+  function report(key,label,value){state[key]=value;let row=document.querySelector('[data-result="'+key+'"]');if(!row){const title=document.createElement('dt');title.textContent=label;row=document.createElement('dd');row.dataset.result=key;results.append(title,row);}row.textContent=String(value);summary.textContent=JSON.stringify(state,null,2);}
+  function safeError(error){const message=String(error?.message||error?.name||'Request failed');if(/token|secret|authorization|bearer|client.?id|eyJ/i.test(message))return error?.name||'Provider error';return message.replace(/https?:\/\/\S+/g,'[URL]').replace(/[\w.+-]+@[\w.-]+/g,'[email]').slice(0,180);}
+  function timeout(promise,label){return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(Error(label+' timed out')),15000))]);}
+  function script(src,test){if(test())return Promise.resolve();return new Promise((resolve,reject)=>{const node=document.createElement('script');const timer=setTimeout(()=>{node.remove();reject(Error('Script timed out'));},15000);node.src=src;node.onload=()=>{clearTimeout(timer);resolve();};node.onerror=()=>{clearTimeout(timer);node.remove();reject(Error('Script could not load'));};document.head.append(node);});}
+  async function run(){
+    retry.disabled=true;
+    for(const key of Object.keys(state))delete state[key];results.replaceChildren();
+    report('origin','Website',location.origin);
+    report('native_before_sdk','Native Apple Pay API',Boolean(window.ApplePaySession));
+    try{
+      const response=await timeout(fetch('https://lockx-production.up.railway.app/api/v1/credits/catalog',{cache:'no-store'}),'LockX settings');
+      if(!response.ok)throw Error('LockX payment settings could not load');
+      const config=await response.json();
+      report('configured','Direct Apple Pay configured',Boolean(config.apple_pay_ready));
+      if(!config.paypal_client_id)throw Error('PayPal public configuration is unavailable');
+      const url=new URL('https://www.paypal.com/sdk/js');url.search=new URLSearchParams({'client-id':config.paypal_client_id,components:'applepay',currency:'USD'});
+      const loaded=await Promise.allSettled([
+        script('https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js',()=>Boolean(customElements.get('apple-pay-button'))),
+        script(url.href,()=>Boolean(window.paypal?.Applepay))
+      ]);
+      report('apple_sdk','Apple script',loaded[0].status==='fulfilled'?'Loaded':safeError(loaded[0].reason));
+      report('paypal_sdk','PayPal Apple Pay component',loaded[1].status==='fulfilled'&&Boolean(window.paypal?.Applepay)?'Loaded':safeError(loaded[1].reason));
+      report('apple_api','Apple Pay API available',Boolean(window.ApplePaySession));
+      try{report('device_capable','Device can make Apple Pay payments',Boolean(window.ApplePaySession?.canMakePayments()));}catch(error){report('device_capable','Device can make Apple Pay payments',safeError(error));}
+      report('button_component','Apple Pay button registered',Boolean(customElements.get('apple-pay-button')));
+      if(window.paypal?.Applepay){
+        report('merchant','PayPal merchant eligibility','Checking…');
+        try{const settings=await timeout(window.paypal.Applepay().config(),'PayPal eligibility');report('merchant','PayPal merchant eligibility',Boolean(settings.isEligible));report('country','Merchant country',settings.countryCode||'Not returned');}
+        catch(error){report('merchant','PayPal merchant eligibility',safeError(error));}
+      }
+    }catch(error){report('error','Check result',safeError(error));}
+    finally{retry.disabled=false;}
+  }
+  retry.onclick=run;run();
+})();
+</script>
+</body></html>
