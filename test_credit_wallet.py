@@ -21,6 +21,7 @@ def identity(authorization: str | None = Header(default=None)):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    monkeypatch.setattr("credit_refunds.sync_refunds", lambda owner=None: 0)
     monkeypatch.setenv("LOCKX_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LOCKX_CREDITS_ENABLED", "1")
     monkeypatch.setenv("PAYPAL_ENVIRONMENT", "sandbox")

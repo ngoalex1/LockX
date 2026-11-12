@@ -15,10 +15,12 @@ from connectors import SearchProfile, configured_connectors, source_catalog
 from worker import scan_case
 from lost_found import create_router
 from in_hand import create_router as in_hand_router
+from credit_refunds import worker_loop as refund_worker_loop
 
 @asynccontextmanager
 async def lifespan(app):
     task = asyncio.create_task(worker_loop()) if os.getenv("LOCKX_RECOVERY_WORKER") == "1" else None
+    refund_task = asyncio.create_task(refund_worker_loop())
     try:
         yield
     finally:
@@ -26,6 +28,10 @@ async def lifespan(app):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        if refund_task:
+            refund_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await refund_task
 
 app = FastAPI(lifespan=lifespan)
 log = logging.getLogger("lockx.supabase")

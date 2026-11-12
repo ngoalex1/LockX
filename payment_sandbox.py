@@ -4,12 +4,15 @@ Uses the production credit router and a separate disposable test wallet. It does
 not load production customer authentication, storage credentials or AI keys.
 """
 import os
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 import credit_wallet as credits
+from credit_refunds import worker_loop
 
 
 def build_sandbox_app():
@@ -26,7 +29,17 @@ def build_sandbox_app():
     def test_owner():
         return "sandbox-only-test-wallet"
 
-    app = FastAPI(title="LockX disposable payment Sandbox")
+    @asynccontextmanager
+    async def lifespan(app):
+        task = asyncio.create_task(worker_loop())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title="LockX disposable payment Sandbox", lifespan=lifespan)
     app.include_router(credits.create_router(test_owner))
 
     @app.get("/", response_class=HTMLResponse)
