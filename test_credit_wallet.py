@@ -238,7 +238,9 @@ def test_unverified_webhook_never_adds_credits(client,monkeypatch):
 
 
 def test_verified_capture_resolves_server_order_and_adds_exact_pack(client,monkeypatch):
-    identifier=checkout()
+    identifier=checkout(provider="google_pay")
+    with credits.database() as db:
+        db.execute("UPDATE credit_checkouts SET resource_id='ORDER123456789' WHERE id=?", (identifier,))
     order={"purchase_units":[{"custom_id":identifier,"payee":{"merchant_id":"MERCHANT"},
         "payments":{"captures":[{"id":"CAPTURE-WEBHOOK","status":"COMPLETED","amount":{"currency_code":"USD","value":"5.00"}}]}}]}
     def provider(method,path,**kwargs):
@@ -248,6 +250,78 @@ def test_verified_capture_resolves_server_order_and_adds_exact_pack(client,monke
     headers={"paypal-transmission-id":"x","paypal-transmission-time":"x","paypal-cert-url":"x","paypal-auth-algo":"x","paypal-transmission-sig":"x"}
     for _ in range(2):
         assert client.post("/api/v1/credits/paypal/webhook",json=event,headers=headers).status_code==200
+    assert balance(client)==10
+
+
+def native_link_event(identifier, **changes):
+    resource={"payment_resource_id":"PLB-"+identifier,"transaction_id":"77761255S1905934F",
+        "transaction_status":"COMPLETED","payee":{"merchant_id":"MERCHANT"},
+        "gross_amount":{"currency_code":"USD","value":"5.00"}}
+    resource.update(changes)
+    return {"id":"NATIVE-EVENT","event_type":"CHECKOUT.PAYMENT-RESOURCE.PAYMENT-COMPLETED","resource":resource}
+
+
+def notification_headers():
+    return {"paypal-transmission-id":"x","paypal-transmission-time":"x","paypal-cert-url":"x",
+        "paypal-auth-algo":"x","paypal-transmission-sig":"x"}
+
+
+def test_native_link_confirmation_binds_exact_resource_and_deduplicates(client,monkeypatch):
+    identifier=checkout()
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"verification_status":"SUCCESS"})
+    event=native_link_event(identifier)
+    for event_id in ["EVENT1","EVENT1","EVENT2"]:
+        event["id"]=event_id
+        assert client.post("/api/v1/credits/paypal/webhook",json=event,headers=notification_headers()).status_code==200
+    assert balance(client)==10
+    assert balance(client,"bob")==0
+    event["resource"]["transaction_id"]="88861255S1905934F"
+    assert client.post("/api/v1/credits/paypal/webhook",json=event,headers=notification_headers()).status_code==200
+    assert balance(client)==20  # A distinct purchase of a reusable link.
+
+
+@pytest.mark.parametrize("changes,status",[
+    ({"transaction_status":"PENDING"},409),
+    ({"transaction_id":""},400),
+    ({"payee":{"merchant_id":"OTHER"}},400),
+    ({"gross_amount":{"currency_code":"EUR","value":"5.00"}},400),
+    ({"gross_amount":{"currency_code":"USD","value":"1.00"}},400),
+    ({"gross_amount":[]},400),
+    ({"payee":None},400),
+])
+def test_native_link_confirmation_rejects_wrong_payment(client,monkeypatch,changes,status):
+    identifier=checkout()
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"verification_status":"SUCCESS"})
+    response=client.post("/api/v1/credits/paypal/webhook",json=native_link_event(identifier,**changes),headers=notification_headers())
+    assert response.status_code==status
+    assert balance(client)==0
+
+
+def test_native_link_confirmation_ignores_other_resources_and_google_orders(client,monkeypatch):
+    identifier=checkout(provider="google_pay")
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"verification_status":"SUCCESS"})
+    for ref in [identifier,str(uuid4())]:
+        assert client.post("/api/v1/credits/paypal/webhook",json=native_link_event(ref),headers=notification_headers()).status_code==200
+    assert balance(client)==0
+
+
+def test_native_link_confirmation_requires_real_signature(client,monkeypatch):
+    identifier=checkout()
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"verification_status":"FAILURE"})
+    assert client.post("/api/v1/credits/paypal/webhook",json=native_link_event(identifier),headers=notification_headers()).status_code==400
+    assert balance(client)==0
+
+
+def test_capture_event_does_not_also_grant_hosted_link_purchase(client,monkeypatch):
+    identifier=checkout()
+    purchase(identifier)
+    order={"purchase_units":[{"custom_id":identifier,"payee":{"merchant_id":"MERCHANT"},
+        "payments":{"captures":[{"id":"DIFFERENT-CAPTURE","status":"COMPLETED","amount":{"currency_code":"USD","value":"5.00"}}]}}]}
+    monkeypatch.setattr(credits,"paypal_call",lambda method,path,**kwargs:
+        {"verification_status":"SUCCESS"} if "verify-webhook" in path else order)
+    event={"id":"CAPTURE-EVENT","event_type":"PAYMENT.CAPTURE.COMPLETED","resource":{
+        "supplementary_data":{"related_ids":{"order_id":"ORDER123456789"}}}}
+    assert client.post("/api/v1/credits/paypal/webhook",json=event,headers=notification_headers()).status_code==200
     assert balance(client)==10
 
 

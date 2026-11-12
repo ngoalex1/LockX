@@ -418,7 +418,29 @@ def create_router(authenticate):
             raise HTTPException(400, "Invalid notification signature")
         resource = event.get("resource", {})
         kind = event.get("event_type")
-        if kind == "PAYMENT.CAPTURE.COMPLETED":
+        if kind == "CHECKOUT.PAYMENT-RESOURCE.PAYMENT-COMPLETED":
+            # Hosted Payment Links identify the exact resource we created.
+            # Never infer the owner from an amount, email address or item label.
+            resource_id = resource.get("payment_resource_id")
+            if not isinstance(resource_id, str) or not resource_id:
+                raise HTTPException(400, "Missing payment link reference")
+            with database() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT id FROM credit_checkouts WHERE resource_id=? AND provider='paypal_link'",
+                                 (resource_id,)).fetchone()
+                if not row:
+                    return {"received": True}
+                payment_id = resource.get("transaction_id")
+                if resource.get("transaction_status") != "COMPLETED":
+                    raise HTTPException(409, "Payment is still awaiting confirmation")
+                if not isinstance(payment_id, str) or not re.fullmatch(r"[A-Z0-9]{10,32}", payment_id):
+                    raise HTTPException(400, "Missing payment transaction reference")
+                amount, payee = resource.get("gross_amount"), resource.get("payee")
+                if not isinstance(amount, dict) or not isinstance(payee, dict):
+                    raise HTTPException(400, "Invalid payment details")
+                grant_purchase(db, row["id"], payment_id, money_cents(amount.get("value")),
+                               amount.get("currency_code"), payee.get("merchant_id"))
+        elif kind == "PAYMENT.CAPTURE.COMPLETED":
             order_id = resource.get("supplementary_data", {}).get("related_ids", {}).get("order_id")
             if not order_id or not re.fullmatch(r"[A-Z0-9]{10,32}", order_id):
                 raise HTTPException(400, "Missing payment order reference")
@@ -426,7 +448,10 @@ def create_router(authenticate):
             with database() as db:
                 db.execute("BEGIN IMMEDIATE")
                 # Ignore this account's other products; never attach them by amount/email.
-                if not db.execute("SELECT 1 FROM credit_checkouts WHERE id=?", (parsed[0],)).fetchone():
+                # Payment Links use their native event above. Processing both
+                # event families could grant a hosted purchase twice.
+                if not db.execute("SELECT 1 FROM credit_checkouts WHERE id=? AND provider='google_pay' AND resource_id=?",
+                                  (parsed[0], order_id)).fetchone():
                     return {"received": True}
                 grant_purchase(db, *parsed)
         elif kind in {"PAYMENT.CAPTURE.REFUNDED", "PAYMENT.CAPTURE.REVERSED"}:

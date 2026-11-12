@@ -26,7 +26,9 @@ Store credentials only in Railway service variables, never in this repository or
 | `PAYPAL_GOOGLE_PAY_MERCHANT_ID` | Approved production Google Pay merchant ID; absent keeps Google Pay hidden |
 | `LOCKX_PUBLIC_APP_ORIGIN` | `https://lockx.ai` (or its existing www alias) |
 
-Webhook: `https://lockx-production.up.railway.app/api/v1/credits/paypal/webhook`, subscribed only to `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.REFUNDED` and `PAYMENT.CAPTURE.REVERSED`.
+Webhook: `https://lockx-production.up.railway.app/api/v1/credits/paypal/webhook`, subscribed only to `CHECKOUT.PAYMENT-RESOURCE.PAYMENT-COMPLETED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.REFUNDED` and `PAYMENT.CAPTURE.REVERSED`.
+
+Hosted Payment Links use the native payment-resource completion event, verified by PayPal's signature API. Its `payment_resource_id` must match the exact stored link, its transaction must be completed, and its merchant, gross amount and currency must match the selected pack. The canonical `transaction_id` deduplicates fulfillment. Capture-completed events fulfill only Google Pay Orders, preventing a hosted purchase from being credited by both event families. PayPal's simulator provides the native event schema but its mock events cannot establish real payment verification.
 
 Optional verified IPN fallback: `https://lockx-production.up.railway.app/api/v1/credits/paypal/ipn`. IPN must carry the generated `LX-<checkout UUID>` item number, the expected merchant, USD amount and the correct live/Sandbox indicator.
 
@@ -34,7 +36,7 @@ Supabase passwordless email uses the existing auth project. Enable production SM
 
 ## Launch checks still required
 
-1. Use the existing Sandbox app to buy each pack with Sandbox buyer funds. Verify the Payment Links API `product_id` becomes the order SKU or verified IPN item number. This mapping is intentionally gated and has not been demonstrated by unit tests.
+1. Use the existing Sandbox app to buy each pack with Sandbox buyer funds. Verify the native payment-resource completion event identifies the exact created link and transaction, passes real signature verification, and is delivered to this app's callback. This provider behavior is intentionally gated and has not been demonstrated by unit tests or the webhook simulator. Also validate native transaction IDs against refund/reversal payment IDs before launch.
 2. Prove one confirmed payment adds exactly 2, 10 or 20 credits, replays do not add more, and a refund removes the corresponding credits. Never use return URL values as proof.
 3. Configure SMTP and verify email delivery, passwordless sign-in and balance recovery on another device.
 4. Finish PayPal Google Pay account provisioning and Google production merchant/domain approval. Test eligible Google Pay and Apple Pay devices. The newly created live PayPal app currently reports that its Expanded Checkout account is not provisioned for either wallet; hosted Payment Links Apple Pay eligibility is a separate setting.
@@ -42,7 +44,7 @@ Supabase passwordless email uses the existing auth project. Enable production SM
 
 ## Validation and rollback
 
-157 billing and existing In-hand tests pass. JavaScript syntax checks pass. The wallet was visually checked at 390px and 320px, with no new animations or image downloads. Provider calls in automated tests are mocked; the real Sandbox checkout and production email checks above are still required.
+168 billing and existing In-hand tests pass. JavaScript syntax checks pass. The wallet was visually checked at 390px and 320px, with no new animations or image downloads. Provider calls in automated tests are mocked; the real Sandbox checkout and production email checks above are still required.
 
 For emergency rollout rollback, set `LOCKX_CREDITS_ENABLED=0`. Keep the database, app credentials and notification endpoint: already paid purchases must still be fulfilled and refunds processed. Do not delete credit tables or recreate the volume. Disabling the flag returns new checks to the existing free flow; it does not erase balances or paid inspection records.
 
