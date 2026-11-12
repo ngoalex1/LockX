@@ -5,7 +5,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const base = API_BASE + '/credits';
   let config, authClient, authBoot, balance = null, selected = 'regular', polling, busy = false, googleBoot, appleBoot, paypalBoot, appleSession;
-  let lastFocus, waitingCheckout, refreshNumber = 0, googlePurchase;
+  let lastFocus, waitingCheckout, refreshNumber = 0, googlePurchase, paymentWarm;
   const pendingKey = 'lockx.pendingCheckout';
   const attemptKey = 'lockx.checkoutAttempt';
   const scriptLoads = new Map();
@@ -170,6 +170,7 @@
     }catch(error){if($('#creditWalletDialog')?.open)message(error.message,true);throw error;}
   }
   async function open(packId) {
+    warmPaymentOptions();
     await ready;if(config.error){toast('Credits unavailable',config.error);return;}
     if(packId&&config.packs.some(p=>p.id===packId))selected=packId;
     const el=dialog();lastFocus=document.activeElement;
@@ -235,21 +236,38 @@
     }
     return paypalBoot;
   }
+  function prepareApplePay() {
+    if(!appleBoot)appleBoot=(async()=>{
+      const appleScript=loadScript('https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js');
+      // Safari already has the payment API. Other browsers need Apple's SDK first.
+      const paymentAPI=window.ApplePaySession?Promise.resolve():appleScript;
+      const provider=Promise.all([loadPayPalWalletSDK(),paymentAPI]).then(async()=>{
+        const applepay=window.paypal.Applepay();let deadline;
+        const settings=await Promise.race([
+          applepay.config(),
+          new Promise((resolve,reject)=>{deadline=setTimeout(()=>reject(Error('Apple Pay took too long to respond.')),15000);}),
+        ]).finally(()=>clearTimeout(deadline));
+        return {applepay,settings};
+      });
+      const [available]=await Promise.all([provider,appleScript]);
+      if(!window.ApplePaySession||!ApplePaySession.canMakePayments())return null;
+      return available.settings.isEligible?available:null;
+    })().then(available=>{if(!available)appleBoot=null;return available;}).catch(error=>{appleBoot=null;throw error;});
+    return appleBoot;
+  }
+  function warmPaymentOptions() {
+    // Only a wallet interaction starts this work. It creates no checkout or payment session.
+    if(!paymentWarm){
+      initializeAuth().catch(()=>null);
+      paymentWarm=ready.then(()=>config.apple_pay_ready?prepareApplePay():null).catch(()=>null);
+    }
+    return paymentWarm;
+  }
   async function setupApplePay() {
     const container=$('#cwApplePay');if(!container)return;
     applePayState(container,'Loading Apple Pay…');
-    if(!appleBoot)appleBoot=(async()=>{
-      await Promise.all([loadPayPalWalletSDK(),loadScript('https://applepay.cdn-apple.com/jsapi/1.latest/apple-pay-sdk.js')]);
-      if(!window.ApplePaySession||!ApplePaySession.canMakePayments())return null;
-      const applepay=window.paypal.Applepay();let deadline;
-      const settings=await Promise.race([
-        applepay.config(),
-        new Promise((resolve,reject)=>{deadline=setTimeout(()=>reject(Error('Apple Pay took too long to respond.')),15000);}),
-      ]).finally(()=>clearTimeout(deadline));
-      return settings.isEligible?{applepay,settings}:null;
-    })().catch(error=>{appleBoot=null;throw error;});
     let available;
-    try{available=await appleBoot;}
+    try{available=await prepareApplePay();}
     catch{applePayState(container,'Apple Pay could not load. Please try again, or use PayPal or card.',true);return;}
     if(!available){appleBoot=null;applePayState(container,'Apple Pay is unavailable right now. You can use PayPal or card.',true);return;}
     if(!container.isConnected)return;
@@ -384,6 +402,13 @@
     if(control.dataset.pickPack){if(!busy){selected=control.dataset.pickPack;updatePackSummary();}return;}
     open(control.dataset.creditPack);
   });
+  const warmOnWalletIntent=event=>{
+    if(event.target.closest('[data-credit-pack],[data-credit-wallet],[data-pick-pack],#cwEmail'))warmPaymentOptions();
+  };
+  document.addEventListener('pointerdown',warmOnWalletIntent,{passive:true});
+  document.addEventListener('pointerover',warmOnWalletIntent,{passive:true});
+  document.addEventListener('touchstart',warmOnWalletIntent,{passive:true});
+  document.addEventListener('focusin',warmOnWalletIntent);
   window.addEventListener('lockx-page',decorate);
   document.addEventListener('DOMContentLoaded',decorate,{once:true});
   window.addEventListener('lockx-session',()=>setTimeout(async()=>{

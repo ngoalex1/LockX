@@ -14,10 +14,11 @@ class Element {
   replaceChildren(...children){this.children=children;}
   addEventListener(){}
   remove(){this.isConnected=false;}
+  showModal(){this.open=true;}
 }
 
 async function harness(options={}) {
-  const events=[], requests=[], scripts=[], listeners={}, sessions=[], timers=new Map();let nextTimer=0;
+  const events=[], requests=[], scripts=[], listeners={}, sessions=[], timers=new Map();let nextTimer=0,authCalls=0;
   const nodes=new Map([['#cwApplePay',new Element()],['#cwGooglePay',new Element()],['#cwMessage',new Element()],['#cwSelectedSummary',new Element()]]);
   const config={credits_required:false,payment_ready:true,apple_pay_ready:true,google_pay_ready:false,paypal_client_id:'public-client',packs:[{id:'regular',credits:20,amount_cents:1000},{id:'large',credits:40,amount_cents:2000}]};
   let syncGesture=false;
@@ -35,7 +36,7 @@ async function harness(options={}) {
   }
   const document={querySelector:s=>nodes.get(s)||null,querySelectorAll:()=>[],createElement:tag=>new Element(tag),addEventListener:(type,fn)=>{listeners[type]=fn;},head:{append(script){scripts.push(script);if(!options.manualScripts)queueMicrotask(()=>script.onload());}}};
   const storage=new Map();
-  const window={ApplePaySession:Session,paypal:options.manualScripts?undefined:{Applepay:()=>applepay,Googlepay:()=>({})},addEventListener(){},ensureLockXAuthClient:async()=>({auth:{getSession:async()=>({data:{session:{access_token:'test-token',user:{email:'test@example.com'}}}})}})};
+  const window={ApplePaySession:Session,paypal:options.manualScripts?undefined:{Applepay:()=>applepay,Googlepay:()=>({})},addEventListener(){},ensureLockXAuthClient:async()=>{authCalls++;if(options.authPending)await options.authPending;return {auth:{getSession:async()=>({data:{session:{access_token:'test-token',user:{email:'test@example.com'}}}})}};}};
   const fetch=async (url,init={})=>{
     if(url.endsWith('/catalog'))return response(config);
     const body=init.body?JSON.parse(init.body):undefined;requests.push({url,body});
@@ -46,11 +47,11 @@ async function harness(options={}) {
   };
   const context={window,document,fetch,ApplePaySession:Session,API_BASE:'https://api.example.test',location:{search:'',origin:'https://lockx.ai'},URL,URLSearchParams,sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:{randomUUID:()=> 'idempotency-key'},setInterval:()=>1,clearInterval(){},setTimeout(fn,delay){const id=++nextTimer;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},console};
   vm.createContext(context);
-  const instrumented=source.replace('window.LockXCredits={ready,', 'window.__walletTest={setupApplePay,loadScript,loadPayPalWalletSDK,renderWallet,updatePackSummary,setSelected:value=>{selected=value;},state:()=>({selected,busy,appleSession})};window.LockXCredits={ready,');
+  const instrumented=source.replace('window.LockXCredits={ready,', 'window.__walletTest={setupApplePay,prepareApplePay,warmPaymentOptions,loadScript,loadPayPalWalletSDK,renderWallet,updatePackSummary,setSelected:value=>{selected=value;},state:()=>({selected,busy,appleSession})};window.LockXCredits={ready,');
   assert.notEqual(instrumented,source,'Test instrumentation must find the public export.');
   vm.runInContext(instrumented,context,{filename:'credit-wallet.js'});
   await window.LockXCredits.ready;
-  return {events,requests,scripts,listeners,sessions,nodes,window,config,applepay,settings,storage,timers,api:window.__walletTest,async setup(){await window.__walletTest.setupApplePay();},click(){const button=nodes.get('#cwApplePay').children.find(el=>el.tag==='apple-pay-button');assert.ok(button,'Apple Pay button exists');syncGesture=true;button.onclick();syncGesture=false;return sessions.at(-1);},pick(id){listeners.click({preventDefault(){},target:{closest:()=>({dataset:{pickPack:id}})}});}};
+  return {events,requests,scripts,listeners,sessions,nodes,window,config,applepay,settings,storage,timers,authCalls:()=>authCalls,api:window.__walletTest,async setup(){await window.__walletTest.setupApplePay();},click(){const button=nodes.get('#cwApplePay').children.find(el=>el.tag==='apple-pay-button');assert.ok(button,'Apple Pay button exists');syncGesture=true;button.onclick();syncGesture=false;return sessions.at(-1);},pick(id){listeners.click({preventDefault(){},target:{closest:()=>({dataset:{pickPack:id}})}});}};
 }
 
 const tests=[];
@@ -168,6 +169,42 @@ test('script network error removes the failed element and allows a clean shared 
 test('script loading times out after 15 seconds and a retry can succeed',async()=>{
   const h=await harness({manualScripts:true});const url='https://sdk.example.test/slow.js';const first=h.api.loadScript(url).catch(error=>error);const timer=[...h.timers.values()][0];assert.equal(timer.delay,15000);timer.fn();const error=await first;assert.match(error.message,/too long/);assert.equal(h.scripts[0].isConnected,false);
   const retry=h.api.loadScript(url);assert.equal(h.scripts.length,2);h.scripts[1].onload();await retry;assert.equal(h.timers.size,0);
+});
+
+test('passive homepage and unrelated pointer activity download no wallet provider scripts',async()=>{
+  const h=await harness();assert.equal(h.scripts.length,0);assert.equal(h.authCalls(),0);h.listeners.pointerover({target:{closest:()=>null}});await Promise.resolve();assert.equal(h.scripts.length,0);assert.equal(h.authCalls(),0);
+});
+
+test('wallet intent prewarms once across hover, focus, touch and tap without creating orders',async()=>{
+  const h=await harness();let configurations=0;h.applepay.config=async()=>{configurations++;return h.settings;};const intent={target:{closest:()=>({dataset:{creditWallet:''}})}};
+  for(const event of ['pointerover','focusin','touchstart','pointerdown','pointerover'])h.listeners[event](intent);
+  await h.api.warmPaymentOptions();assert.equal(h.authCalls(),1);assert.equal(configurations,1);assert.equal(h.scripts.length,1);assert.equal(h.sessions.length,0);assert.equal(h.requests.length,0,'Prewarming never creates a checkout or fetches a wallet');
+  await h.setup();assert.equal(configurations,1,'Rendering reuses eligible merchant configuration');assert.equal(h.scripts.length,1);
+});
+
+test('merchant configuration starts before the independent Apple script finishes',async()=>{
+  const h=await harness({manualScripts:true}),started=deferred();h.applepay.config=async()=>{started.resolve();return h.settings;};
+  const prepared=h.api.prepareApplePay();const paypalScript=h.scripts.find(script=>script.src.includes('paypal.com'));const appleScript=h.scripts.find(script=>script.src.includes('cdn-apple.com'));
+  assert.ok(paypalScript&&appleScript);h.window.paypal={Applepay:()=>h.applepay,Googlepay:()=>({})};paypalScript.onload();await started.promise;assert.equal(typeof appleScript.onload,'function','Apple SDK is still loading while merchant configuration runs');
+  appleScript.onload();const available=await prepared;assert.equal(available.settings.isEligible,true);assert.equal(h.timers.size,0);
+});
+
+test('a browser without native Apple Pay waits for the Apple API before provider configuration',async()=>{
+  const h=await harness({manualScripts:true});const NativeSession=h.window.ApplePaySession;h.window.ApplePaySession=undefined;let configurations=0;h.applepay.config=async()=>{configurations++;return h.settings;};
+  const prepared=h.api.prepareApplePay();const paypalScript=h.scripts.find(script=>script.src.includes('paypal.com'));const appleScript=h.scripts.find(script=>script.src.includes('cdn-apple.com'));
+  h.window.paypal={Applepay:()=>h.applepay,Googlepay:()=>({})};paypalScript.onload();await h.api.loadPayPalWalletSDK();assert.equal(configurations,0,'Provider eligibility cannot run ahead of the Apple polyfill');
+  h.window.ApplePaySession=NativeSession;appleScript.onload();await prepared;assert.equal(configurations,1);assert.equal(h.timers.size,0);
+});
+
+test('opening a wallet overlaps payment initialization with pending auth initialization',async()=>{
+  const auth=deferred();const h=await harness({authPending:auth.promise});h.nodes.set('#creditWalletDialog',new Element('dialog'));h.nodes.set('#cwDialogContent',new Element());h.nodes.set('#cwPayPal',new Element());
+  const opening=h.window.LockXCredits.open();const prepared=await h.api.warmPaymentOptions();assert.equal(h.authCalls(),1);assert.equal(prepared.settings.isEligible,true,'Payment configuration finishes while auth is pending');assert.equal(h.nodes.get('#cwDialogContent').innerHTML.includes('Opening your credit wallet'),true);
+  auth.resolve();await opening;assert.equal(h.authCalls(),1,'Opening reuses the intent-warmed authentication client');
+});
+
+test('repeated hover cannot repeatedly request ineligible configuration, while explicit setup retries',async()=>{
+  const options={eligible:false};const h=await harness(options);let calls=0;h.applepay.config=async()=>{calls++;return h.settings;};await h.api.warmPaymentOptions();await h.api.warmPaymentOptions();h.listeners.pointerover({target:{closest:()=>({})}});await h.api.warmPaymentOptions();assert.equal(calls,1);
+  h.settings.isEligible=true;await h.setup();assert.equal(calls,2);assert.ok(h.nodes.get('#cwApplePay').children.some(el=>el.tag==='apple-pay-button'));assert.equal(h.scripts.length,1);
 });
 
 module.exports=async function run(){const results=[];for(const [name,fn] of tests){try{await fn();results.push({name,status:'PASS'});}catch(error){results.push({name,status:'FAIL',error:error.stack});}}return results;};

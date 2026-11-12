@@ -47,7 +47,9 @@ Supabase passwordless email uses the existing auth project. Enable production SM
 
 ## Validation and rollback
 
-67 targeted wallet/refund tests and 19 frontend Apple Pay flow tests pass. Frontend checks exercise the actual wallet script with mocked provider APIs, including cancellation, fixed totals, shared SDK loading, capture-before-success, independent wallet loading, SDK timeouts and retry recovery. These checks do not replace a real direct Apple Pay purchase. The earlier wallet layout was visually checked at 390px and 320px; this update adds no animations or image downloads.
+67 targeted wallet/refund tests and 25 frontend Apple Pay flow tests pass. Frontend checks exercise the actual wallet script with mocked provider APIs, including cancellation, fixed totals, shared SDK loading, capture-before-success, independent wallet loading, SDK timeouts, retry recovery and wallet-intent prewarming. These checks do not replace a real direct Apple Pay purchase. The earlier wallet layout was visually checked at 390px and 320px; this update adds no animations or image downloads.
+
+Wallet interactions start authentication and Apple Pay preparation together. Eligible provider configuration and downloaded SDKs are reused on subsequent wallet opens. Safari can request merchant configuration while the Apple button script loads; browsers without the native Apple Pay API wait for Apple's SDK first. Passive homepage visits do not download payment SDKs. Prewarming creates no order or Apple Pay session, and capture still requires the authenticated purchase flow.
 
 `/apple-pay-check.html` is a noindex, read-only diagnostic for actual SDK loading, device capability, custom-element registration and PayPal merchant eligibility. It does not create orders, request payment approval or take payment. A backend readiness flag alone does not prove merchant eligibility or a visible button on a customer's device.
 
