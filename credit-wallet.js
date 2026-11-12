@@ -33,16 +33,16 @@
     }).catch(error => {authBoot=null;throw error;});
     return authBoot;
   }
-  async function authorization() {
+  async function authorization(forWallet = false) {
     await ready;
-    if (!active()) return '';
+    if (!active() && !forWallet) return '';
     const client = await initializeAuth();
     const {data,error} = await client.auth.getSession();
     if (error) throw error;
     return data.session?.access_token ? 'Bearer ' + data.session.access_token : '';
   }
   async function request(path, options = {}) {
-    const token = await authorization();
+    const token = await authorization(true);
     if (!token) throw Error('Sign in with your email to use your credits.');
     const response = await fetch(base + path, {...options, cache:'no-store', headers:{
       Authorization:token, ...(options.body ? {'Content-Type':'application/json'} : {}), ...options.headers,
@@ -172,7 +172,7 @@
     try{
       await renderWallet();
       const checkout=query.get('checkout') || stored(pendingKey);
-      if(checkout&&await authorization())watchCheckout(checkout);
+      if(checkout&&await authorization(true))watchCheckout(checkout);
     }catch(error){$('#cwDialogContent').innerHTML=`<h2 id="cwWalletTitle">Your credit wallet</h2><p class="cw-message cw-error">${esc(error.message)}</p><button type="button" class="cw-button" id="cwTryAgain">Try again</button>`;$('#cwTryAgain').onclick=()=>open();}
   }
   async function buyPayPal() {
