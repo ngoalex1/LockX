@@ -13,6 +13,14 @@ import credit_wallet as credits
 import in_hand
 
 
+# Saved checkouts retain their original price and credit count after retirement.
+RETIRED_PACKS = {"starter": {"amount_cents": 100, "credits": 2}}
+
+
+def saved_pack(pack):
+    return RETIRED_PACKS[pack] if pack in RETIRED_PACKS else credits.PACKS[pack]
+
+
 def identity(authorization: str | None = Header(default=None)):
     if authorization not in {"Bearer alice", "Bearer bob"}:
         raise HTTPException(401, "Sign in")
@@ -43,7 +51,7 @@ def client(tmp_path, monkeypatch):
 
 def checkout(owner="alice", pack="regular", provider="paypal_link"):
     checkout_id = str(uuid4())
-    p = credits.PACKS[pack]
+    p = saved_pack(pack)
     with credits.database() as db:
         credits.wallet(db, owner)
         db.execute("""INSERT INTO credit_checkouts
@@ -54,7 +62,7 @@ def checkout(owner="alice", pack="regular", provider="paypal_link"):
 
 
 def purchase(checkout_id, payment_id="CAPTURE123", pack="regular"):
-    p = credits.PACKS[pack]
+    p = saved_pack(pack)
     with credits.database() as db:
         db.execute("BEGIN IMMEDIATE")
         credits.grant_purchase(db,checkout_id,payment_id,p["amount_cents"],"USD","MERCHANT")
@@ -76,7 +84,7 @@ def create_check(client, owner="alice"):
 
 def test_exact_pack_prices_and_no_client_amount(client):
     data = client.get("/api/v1/credits/catalog").json()
-    assert [(p["amount_cents"],p["credits"]) for p in data["packs"]] == [(100,2),(500,10),(1000,20)]
+    assert [(p["amount_cents"],p["credits"]) for p in data["packs"]] == [(500,10),(1000,20),(2000,40)]
     assert "test-secret" not in json.dumps(data)
     assert client.post("/api/v1/credits/checkouts",headers={"Authorization":"Bearer alice"},
         json={"pack_id":"regular","request_key":str(uuid4()),"amount_cents":1}).status_code == 422
@@ -88,7 +96,7 @@ def test_authentication_and_empty_credit_gate(client):
     assert balance(client) == 0
 
 
-@pytest.mark.parametrize("pack,expected", [("starter",2),("regular",10),("frequent",20)])
+@pytest.mark.parametrize("pack,expected", [("starter",2),("regular",10),("frequent",20),("bulk",40)])
 def test_purchase_granted_once_for_duplicate_notifications(client,pack,expected):
     identifier=checkout(pack=pack)
     purchase(identifier,pack=pack)
@@ -224,7 +232,7 @@ def test_missing_configuration_disables_purchases_without_blocking_old_records(c
     monkeypatch.delenv("PAYPAL_CLIENT_SECRET")
     assert not client.get("/api/v1/credits/catalog").json()["payment_ready"]
     assert client.post("/api/v1/credits/checkouts",headers={"Authorization":"Bearer alice"},
-        json={"pack_id":"starter","request_key":str(uuid4())}).status_code==503
+        json={"pack_id":"regular","request_key":str(uuid4())}).status_code==503
     monkeypatch.setenv("LOCKX_CREDITS_ENABLED","0")
     assert create_check(client).status_code==201
 
@@ -326,20 +334,42 @@ def test_capture_event_does_not_also_grant_hosted_link_purchase(client,monkeypat
     assert balance(client)==10
 
 
-def test_link_creation_uses_server_pack_and_stable_request_id(client,monkeypatch):
+@pytest.mark.parametrize("pack,amount,credit_count", [("regular","5.00",10),("frequent","10.00",20),("bulk","20.00",40)])
+def test_link_creation_uses_server_pack_and_stable_request_id(client,monkeypatch,pack,amount,credit_count):
     calls=[]
     def provider(method,path,**kwargs):
         calls.append((path,kwargs))
         return {"id":"PLB-TEST","links":[{"rel":"payment_link","href":"https://www.sandbox.paypal.com/ncp/payment/PLB-TEST"}]}
     monkeypatch.setattr(credits,"paypal_call",provider)
-    body={"pack_id":"frequent","request_key":str(uuid4())}
+    body={"pack_id":pack,"request_key":str(uuid4())}
     response=client.post("/api/v1/credits/checkouts",json=body,headers={"Authorization":"Bearer alice"})
     assert response.status_code==201,response.text
     again=client.post("/api/v1/credits/checkouts",json=body,headers={"Authorization":"Bearer alice"})
     assert response.json()["id"]==again.json()["id"]
     assert len(calls)==1
-    assert calls[0][1]["body"]["line_items"][0]["unit_amount"]=={"currency_code":"USD","value":"10.00"}
+    assert calls[0][1]["body"]["line_items"][0]["unit_amount"]=={"currency_code":"USD","value":amount}
+    assert response.json()["credits"]==credit_count
     assert calls[0][1]["body"]["line_items"][0]["collect_shipping_address"] is False
+    assert balance(client)==0
+
+
+def test_retired_one_dollar_pack_cannot_create_new_checkout(client,monkeypatch):
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:pytest.fail("Retired pack reached PayPal"))
+    response=client.post("/api/v1/credits/checkouts",headers={"Authorization":"Bearer alice"},
+        json={"pack_id":"starter","request_key":str(uuid4())})
+    assert response.status_code==422
+    with credits.database() as db:
+        assert db.execute("SELECT count(*) FROM credit_checkouts").fetchone()[0]==0
+
+
+def test_retired_pack_still_honors_saved_payment_and_refund(client,monkeypatch):
+    identifier=checkout(pack="starter")
+    monkeypatch.setattr(credits,"paypal_call",lambda *args,**kwargs:{"verification_status":"SUCCESS"})
+    event=native_link_event(identifier,gross_amount={"currency_code":"USD","value":"1.00"})
+    assert client.post("/api/v1/credits/paypal/webhook",json=event,headers=notification_headers()).status_code==200
+    assert balance(client)==2
+    with credits.database() as db:
+        credits.reverse_purchase(db,event["resource"]["transaction_id"],"LEGACY-REFUND",100)
     assert balance(client)==0
 
 

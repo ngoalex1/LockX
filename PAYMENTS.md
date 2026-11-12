@@ -1,6 +1,6 @@
 # LockX verification credits
 
-One item verification costs one credit, including up to six selected photos and one 10-second recording. The packs are $1/2 credits, $5/10 credits, and $10/20 credits. All packs cost 50 cents per verification. There is no subscription or automatic renewal.
+One item verification costs one credit, including up to six selected photos and one 10-second recording. The packs are $5/10 credits, $10/20 credits, and $20/40 credits. All packs cost 50 cents per verification. There is no subscription or automatic renewal. New $1/2-credit checkouts are retired; existing purchases and their refund records retain their original amounts and credits.
 
 ## Implementation
 
@@ -37,7 +37,7 @@ Supabase passwordless email uses the existing auth project. Enable production SM
 ## Launch checks still required
 
 1. Use the existing Sandbox app to buy each pack with Sandbox buyer funds. Verify the native payment-resource completion event identifies the exact created link and transaction, passes real signature verification, and is delivered to this app's callback. This provider behavior is intentionally gated and has not been demonstrated by unit tests or the webhook simulator. Also validate native transaction IDs against refund/reversal payment IDs before launch.
-2. Prove one confirmed payment adds exactly 2, 10 or 20 credits, replays do not add more, and a refund removes the corresponding credits. Never use return URL values as proof.
+2. Prove one confirmed payment adds exactly 10, 20 or 40 credits, replays do not add more, and a refund removes the corresponding credits. Verify historical $1/2-credit payments and refunds still reconcile. Never use return URL values as proof.
 3. Configure SMTP and verify email delivery, passwordless sign-in and balance recovery on another device.
 4. Finish PayPal Google Pay account provisioning and Google production merchant/domain approval. Test eligible Google Pay and Apple Pay devices. The newly created live PayPal app currently reports that its Expanded Checkout account is not provisioned for either wallet; hosted Payment Links Apple Pay eligibility is a separate setting.
 5. Confirm the Railway persistent volume remains mounted and back up `in-hand.sqlite3` before paid launch. Deploy server before activating frontend paid gating. Keep both rollout flags off until the above checks pass.

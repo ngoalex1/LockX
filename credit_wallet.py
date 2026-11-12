@@ -21,9 +21,9 @@ from typing import Literal
 
 log = logging.getLogger("lockx.credits")
 PACKS = {
-    "starter": {"name": "Starter", "amount_cents": 100, "credits": 2},
     "regular": {"name": "Regular", "amount_cents": 500, "credits": 10},
     "frequent": {"name": "Frequent", "amount_cents": 1000, "credits": 20},
+    "bulk": {"name": "Bulk", "amount_cents": 2000, "credits": 40},
 }
 
 
@@ -280,7 +280,7 @@ def payment_from_order(order):
 
 class CheckoutCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    pack_id: Literal["starter", "regular", "frequent"]
+    pack_id: Literal["regular", "frequent", "bulk"]
     provider: Literal["paypal_link", "google_pay"] = "paypal_link"
     request_key: str
 
