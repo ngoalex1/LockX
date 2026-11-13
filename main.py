@@ -587,3 +587,10 @@ app.include_router(in_hand_router(current_user))
 # Credit wallet uses the same verified Supabase identity as the private workspace.
 from credit_wallet import create_router as credit_router
 app.include_router(credit_router(current_user))
+
+# Business analytics and credit grants require the verified server-side admin ID.
+from credit_admin import create_router as credit_admin_router
+app.include_router(credit_admin_router(authenticated_identity))
+
+from credit_social import create_router as credit_traffic_router
+app.include_router(credit_traffic_router(current_user))

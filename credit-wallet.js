@@ -54,7 +54,14 @@
     if (!response.ok) throw Error(typeof data.detail === 'string' ? data.detail : 'Please try again.');
     return data;
   }
-  function post(path, body) { return request(path, {method:'POST',body:JSON.stringify(body)}); }
+  async function post(path, body) {
+    if(path==='/checkouts'){
+      const pending=window.LockXMarketing?.getVisit?.();
+      const visit=pending?await Promise.race([pending,new Promise(resolve=>setTimeout(()=>resolve(null),250))]):null;
+      if(visit)body={...body,marketing_visit_id:visit};
+    }
+    return request(path, {method:'POST',body:JSON.stringify(body)});
+  }
   function pack() { return config?.packs?.find(p=>p.id===selected); }
   const price = cents => '$' + (cents/100).toFixed(cents%100 ? 2 : 0);
   function pricingCards() {
@@ -158,7 +165,7 @@
     const data={session:await walletSession()};
     const signed=!!data.session;
     el.innerHTML=`<p class="lx-eyebrow">Your LockX credits</p><h2 id="cwWalletTitle">${signed?'A little proof, on hand.':'Your email. Your credits.'}</h2>
-      ${signed?`<div class="cw-balance"><strong>${balance===null?'…':balance}</strong><span>available credits</span></div><div class="cw-account"><span>${esc(data.session.user.email)}</span><button type="button" class="cw-text-button" id="cwSignOut">Sign out</button></div>`:
+      ${signed?`<div class="cw-balance"><strong>${balance===null?'…':balance}</strong><span>available credits</span></div><div class="cw-account"><span>${esc(data.session.user.email)}</span><button type="button" class="cw-text-button" id="cwSignOut">Sign out</button></div><button type="button" class="cw-text-button" id="cwOpenAdmin" hidden>Admin dashboard →</button>`:
       `<p class="cw-intro">Get a sign-in link to buy credits and use them on any device. No password needed.</p><form id="cwEmailForm"><label for="cwEmail">Email address</label><div class="cw-email-row"><input id="cwEmail" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required maxlength="254"><button class="cw-button" type="submit">Send sign-in link</button></div></form>`}
       <div id="cwMessage" class="cw-message" role="status" hidden></div>
       <div class="cw-pack-picker" role="group" aria-label="Choose your credit pack">${config.packs.map(p=>`<button type="button" data-pick-pack="${p.id}" aria-pressed="${p.id===selected}"><strong>${p.credits} credits</strong><span>${price(p.amount_cents)}</span></button>`).join('')}</div>
@@ -184,6 +191,13 @@
       adoptSession(null);waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);clearInterval(polling);await renderWallet();updateBalanceLabels();
     });
     $('#cwPayPal').onclick=buyPayPal;
+    if(signed&&window.LockXAdmin){
+      const owner=data.session.user.id;
+      window.LockXAdmin.checkAccess().then(allowed=>{
+        const link=$('#cwOpenAdmin');
+        if(link&&activeOwner===owner){link.hidden=!allowed;link.onclick=()=>{dialog().close();window.LockXAdmin.open();};}
+      }).catch(()=>{});
+    }
     if(signed&&config.apple_pay_ready)setupApplePay();
     if(signed&&config.google_pay_ready)setupGooglePay().catch(()=>{const el=$('#cwGooglePay');if(el)el.textContent='Google Pay is unavailable on this device. You can use the payment options above.';});
     if(signed)refreshWallet().catch(()=>{
@@ -217,7 +231,7 @@
       balanceLoading=false;balanceFailed=false;
       balance=wallet.balance;updateBalanceLabels();
       const count=$('.cw-balance strong');if(count)count.textContent=balance;
-      const labels={purchase:'Credits purchased',verification:'Item verification',technical_refund:'Credit restored — technical issue',payment_refund:'Payment refunded'};
+      const labels={purchase:'Credits purchased',verification:'Item verification',technical_refund:'Credit restored — technical issue',payment_refund:'Payment refunded',admin_grant:'Free credits from LockX'};
       const history=$('#cwHistory');
       if(history)history.innerHTML=wallet.history.length?wallet.history.map(row=>`<div><span>${esc(labels[row.kind]||'Credit adjustment')}<small>${new Date(row.created*1000).toLocaleDateString()}</small></span><strong>${row.delta>0?'+':''}${row.delta}</strong></div>`).join(''):'Your credit purchases and verifications will appear here.';
       if(wallet.credit_debt)message('A refunded payment included credits already used. Your next purchase first covers that balance.',true);
@@ -232,6 +246,7 @@
     walletFlight=flight;return flight.promise;
   }
   async function open(packId) {
+    window.LockXMarketing?.track?.('wallet_open');
     warmPaymentOptions();
     await ready;if(config.error){toast('Credits unavailable',config.error);return;}
     if(packId&&config.packs.some(p=>p.id===packId))selected=packId;

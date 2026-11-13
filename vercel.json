@@ -1,5 +1,17 @@
 {
+  "rewrites": [
+    {"source": "/Ngoalex1", "destination": "/index.html"},
+    {"source": "/ngoalex1", "destination": "/index.html"}
+  ],
   "headers": [
+    {
+      "source": "/Ngoalex1",
+      "headers": [{"key":"X-Robots-Tag","value":"noindex, noarchive"}]
+    },
+    {
+      "source": "/ngoalex1",
+      "headers": [{"key":"X-Robots-Tag","value":"noindex, noarchive"}]
+    },
     {
       "source": "/.well-known/apple-developer-merchantid-domain-association",
       "headers": [

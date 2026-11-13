@@ -40,6 +40,7 @@ function image(record, className = 'case-image') { const photo = photoList(recor
 // In-hand is the public product. Other workspaces initialize only on explicit legacy links.
 function lockxSitePage() {
   const hash=location.hash.slice(1);
+  if(hash==='admin'||(!hash&&location.pathname.replace(/\/$/,'').toLowerCase()==='/ngoalex1'))return 'admin';
   if(hash==='in-hand'||hash.startsWith('in-hand/'))return 'in-hand';
   if(new URLSearchParams(location.search).has('item'))return 'lost-found';
   if(['vault','cases','matches','alerts','monitoring','sources','lost-found','found','caseDetail','vaultDetail'].includes(hash))return hash==='found'?'lost-found':hash;
@@ -75,6 +76,10 @@ window.ensureLockXAuthClient=ensureLockXAuthClient;
 let lockxLegacyBoot=null;
 async function lockxSiteRoute() {
   const requested=lockxSitePage();
+  if(requested==='admin'){
+    if(window.LockXAdmin)await window.LockXAdmin.open();
+    return;
+  }
   if(requested==='landing'||requested==='in-hand'){go(requested);return;}
   if(!lockxLegacyBoot)lockxLegacyBoot=initLegacyWorkspace();
   try{await lockxLegacyBoot;}catch(error){lockxLegacyBoot=null;if(['landing','in-hand'].includes(lockxSitePage())){go(lockxSitePage());return;}throw error;}
@@ -82,9 +87,11 @@ async function lockxSiteRoute() {
 }
 function init(){return lockxSiteRoute();}
 window.addEventListener('hashchange',()=>{lockxSiteRoute().catch(error=>{if(!['landing','in-hand'].includes(lockxSitePage()))toast('Workspace unavailable',error.message||'Please try again.');});});
+window.addEventListener('popstate',()=>{lockxSiteRoute().catch(()=>{});});
 function go(page) {
   if(page==='dashboard'||page==='home'||!document.getElementById(page))page='landing';
-  const publicPage=page==='landing'||page==='in-hand';
+  if(page!=='admin'&&location.pathname.replace(/\/$/,'').toLowerCase()==='/ngoalex1')history.replaceState(null,'','/'+location.search+'#'+page);
+  const publicPage=page==='landing'||page==='in-hand'||page==='admin';
   document.body.classList.toggle('lockx-public',publicPage);
   document.body.classList.toggle('landing-active',page==='landing');
   if(publicPage)document.querySelector('#authModal')?.classList.remove('open');

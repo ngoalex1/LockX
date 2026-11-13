@@ -157,6 +157,7 @@
       const payload = {title:'Photo verification', consent:true, auto_publish:true, publish_matched_photos:true};
       const body = new FormData(); body.append('payload',JSON.stringify(payload)); selected.forEach((p,i)=>body.append('photos',p.blob,`reference-${i+1}.jpg`));
       const record = await (await api('/requests',{method:'POST',body},true)).json();
+      window.LockXMarketing?.recordVerification?.(record.id);
       remember(record.id,record.manage_key);
       if(window.matchMedia('(max-width:720px)').matches||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)){location.hash='in-hand/capture/'+record.token;return;}
       $('#ihCreated').innerHTML = linkBox(record)+`<details class="ih-result-details"><summary>Keep your private management link</summary>${managementBox(record)}</details>`;
