@@ -1,0 +1,82 @@
+/* Approved Soft chapters: section color bands around the existing content. */
+body.lockx-public .lx-home .lx-compact-hero { padding-bottom: 0; }
+
+body.lockx-public .lx-home .lx-process-band,
+body.lockx-public .lx-home #lockxPricing,
+body.lockx-public .lx-home #lxQuestions,
+body.lockx-public .lx-home .lx-final-cta {
+  position: relative;
+  isolation: isolate;
+}
+body.lockx-public .lx-home .lx-process-band::before,
+body.lockx-public .lx-home #lockxPricing::before,
+body.lockx-public .lx-home #lxQuestions::before,
+body.lockx-public .lx-home .lx-final-cta::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: -1;
+}
+
+body.lockx-public .lx-home .lx-process-band {
+  margin-top: 28px;
+  padding: 28px 0;
+}
+body.lockx-public .lx-home .lx-process-band::before {
+  background: #e8d6d0;
+  border-top: 1px solid var(--lx-line);
+  border-bottom: 1px solid var(--lx-line);
+}
+body.lockx-public .lx-home .lx-process-band > .lx-compact-art { margin-top: 0; }
+body.lockx-public .lx-home .lx-process-band > .lx-compact-steps { margin-top: 22px; }
+body.lockx-public .lx-home .lx-process-band > .lx-rose-scope {
+  max-width: 450px;
+  margin: 16px auto 0;
+  padding-top: 0;
+}
+
+body.lockx-public .lx-home #lockxPricing { padding-block: 76px; }
+body.lockx-public .lx-home #lockxPricing::before {
+  background: #fffcf7;
+  border-bottom: 1px solid var(--lx-line);
+}
+body.lockx-public .lx-home #lxQuestions { padding-block: 76px; }
+body.lockx-public .lx-home #lxQuestions::before {
+  background: #f8f0eb;
+  border-bottom: 1px solid var(--lx-line);
+}
+
+body.lockx-public .lx-home .lx-final-cta {
+  padding-block: 60px;
+  color: #fffcf7;
+}
+body.lockx-public .lx-home .lx-final-cta::before { background: #743e47; }
+body.lockx-public .lx-home .lx-final-cta h2,
+body.lockx-public .lx-home .lx-final-cta > p { color: #fffcf7; }
+body.lockx-public .lx-home .lx-final-cta > .lx-cta-emblem {
+  background: #fffcf7;
+  color: var(--lx-success);
+}
+body.lockx-public .lx-home .lx-final-cta > .lx-button {
+  background: #fffcf7;
+  color: #743e47 !important;
+  box-shadow: none;
+  transition: none;
+}
+body.lockx-public .lx-home .lx-final-cta > .lx-button:hover {
+  background: #f8f0eb;
+  box-shadow: none;
+}
+body.lockx-public .lx-home .lx-final-cta > .lx-button:focus-visible { outline-color: #fffcf7; }
+
+@media (max-width: 760px) {
+  body.lockx-public .lx-home #lockxPricing { padding-top: 58px; padding-bottom: 60px; }
+  body.lockx-public .lx-home #lxQuestions { padding-block: 60px; }
+  body.lockx-public .lx-home .lx-final-cta { padding-block: 36px; }
+}

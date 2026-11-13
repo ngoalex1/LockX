@@ -72,6 +72,7 @@
           <p class="lx-compact-description">Match your listing photos to a fresh 10-second item video. Give buyers a verification record they can check.</p>
           <div class="lx-compact-actions"><a class="lx-button" href="#in-hand">Verify your listing photos ${arrow}</a><p class="lx-compact-note">50¢ per item check · Credit packs from $5</p></div>
         </div>
+        <section class="lx-process-band" aria-label="How verification works">
         <div class="lx-compact-art">${inHandCapture('compact-video')}</div>
         <section class="lx-compact-steps" id="lxHowItWorks" aria-label="How LockX works in three steps">
           <ol>
@@ -81,6 +82,7 @@
           </ol>
         </section>
         <p class="lx-rose-scope">Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</p>
+        </section>
       </div>
 
       <section class="lx-faq lx-section lx-wrap" id="lxQuestions" aria-labelledby="lxFAQTitle"><div class="lx-section-heading"><h2 id="lxFAQTitle">A few good questions.</h2></div><div class="lx-faq-list"><details><summary>What does In-hand Verified confirm?<span aria-hidden="true">+</span></summary><p>It checks whether your selected photos match the physical item shown in a newly recorded video. It does not establish brand authenticity, legal ownership, condition beyond what is visible, or a guarantee of a transaction.</p></details><details><summary>Do I need an app or an account?<span aria-hidden="true">+</span></summary><p>No. Add your photos and open the camera link in your phone’s browser. Keep your private link so you can return to your result.</p></details><details><summary>How long does it take?<span aria-hidden="true">+</span></summary><p>The recording lasts 10 seconds and stops automatically. Upload and AI comparison follow; the total time depends on your connection, photos, and the evidence captured.</p></details><details><summary>How do I save the verified photos?<span aria-hidden="true">+</span></summary><p>Your approved images appear with QR codes even if another selected photo does not match. Only verified photos are included when saving. Tap the save button, then choose Save Images on iPhone or a supported save option on Android. Your phone asks you to confirm. Individual image saving is also available.</p></details></div></section>
