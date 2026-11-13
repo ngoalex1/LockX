@@ -59,9 +59,16 @@
       <div class="lx-hero lx-wrap lx-compact-hero">
         <div class="lx-compact-intro">
           <p class="lx-eyebrow">LockX in-hand verification</p>
+          <p class="lx-compact-roi">The best ROI in sales.</p>
           <h1 id="lxHeroTitle"><span class="lx-compact-stat">45%</span><span class="lx-compact-headline">more buying<br>confidence.</span></h1>
           <p class="lx-compact-price">For just 50¢.</p>
-          <p class="lx-compact-roi">The best ROI in sales.</p>
+          <figure class="lx-compact-proof" aria-label="Illustrative LockX verified Pokémon card photo">
+            <div class="lx-compact-proof-card">
+              ${pokemonCard('front','compact-verified-photo').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}
+              <div class="lx-compact-proof-seal"><div><span class="lx-compact-proof-brand">lock<span>x</span></span><small>${check} In-hand Verified</small></div>${qr()}</div>
+            </div>
+            <figcaption>Illustrative example</figcaption>
+          </figure>
           <p class="lx-compact-description">Match your listing photos to a fresh 10-second item video. Give buyers a verification record they can check.</p>
           <div class="lx-compact-actions"><a class="lx-button" href="#in-hand">Verify your listing photos ${arrow}</a><p class="lx-compact-note">50¢ per item check · Credit packs from $5</p></div>
         </div>
