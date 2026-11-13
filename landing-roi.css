@@ -1,0 +1,244 @@
+/* Approved Confidence first layout. Existing illustrations stay unchanged. */
+body.lockx-public .lx-home .lx-roi-hero {
+  padding-top: 0;
+  text-align: left;
+}
+body.lockx-public .lx-home .lx-roi-explainer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding-top: 35px;
+  margin: 0;
+}
+body.lockx-public .lx-home .lx-roi-explainer > p {
+  max-width: 480px;
+  margin: 0;
+  color: var(--lx-muted);
+  font-size: 16px;
+  line-height: 1.65;
+}
+body.lockx-public .lx-home .lx-roi-actions {
+  flex: none;
+  text-align: center;
+}
+body.lockx-public .lx-home .lx-roi-actions > .lx-button {
+  min-height: 54px;
+  padding: 18px 24px;
+  gap: 18px;
+  font-size: 15px;
+  line-height: 1.2;
+  transition: none;
+}
+body.lockx-public .lx-home .lx-roi-actions > small {
+  display: block;
+  margin-top: 11px;
+  color: var(--lx-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+body.lockx-public .lx-home .lx-roi-claim {
+  min-height: 480px;
+  padding: 48px 0 34px;
+  text-align: center;
+}
+body.lockx-public .lx-home .lx-roi-claim > .lx-eyebrow {
+  margin: 0 0 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+body.lockx-public .lx-home .lx-roi-claim h1 {
+  max-width: 800px;
+  margin: 0 auto;
+  color: var(--lx-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1.04;
+  letter-spacing: -2.2px;
+}
+body.lockx-public .lx-home .lx-roi-claim h1 > .lx-roi-value {
+  display: block;
+  margin-bottom: 12px;
+  background: none;
+  color: var(--lx-action);
+  -webkit-text-fill-color: currentColor;
+  font-size: 132px;
+  line-height: .95;
+  letter-spacing: -8px;
+}
+body.lockx-public .lx-home .lx-roi-claim h1 em {
+  color: var(--lx-action);
+  font-style: italic;
+  font-weight: 400;
+}
+body.lockx-public .lx-home .lx-roi-tagline {
+  margin: 20px 0 0;
+  color: var(--lx-action);
+  font: italic 25px/1.3 Georgia, "Times New Roman", serif;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-steps-fan {
+  max-width: none;
+  margin: 0 0 35px;
+  padding: 0;
+}
+body.lockx-public .lx-home .lx-roi-steps-title {
+  margin: 0 0 26px;
+  color: var(--lx-ink);
+  font: 400 29px/1.12 Georgia, "Times New Roman", serif;
+  letter-spacing: -1px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-steps-fan ol {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  padding: 12px 3px 8px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-card {
+  height: auto;
+  min-height: 0;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 0;
+  padding: 22px 20px 24px;
+  border-width: 1.5px;
+  border-radius: 22px;
+  box-shadow: none;
+  text-align: left;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-card:first-child {
+  transform: rotate(-3deg) translateY(8px);
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-card:nth-child(2) {
+  transform: none;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-card:last-child {
+  transform: rotate(3deg) translateY(8px);
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-number {
+  font: italic 28px/1 Georgia, "Times New Roman", serif;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-art {
+  height: 220px;
+  margin: 6px -8px 12px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-capture {
+  width: 100%;
+  max-width: 320px;
+  height: 220px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-photos {
+  max-width: 290px;
+  height: 200px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-photos > .lx-item-art {
+  top: 6px;
+  width: 51%;
+  height: 188px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-proof {
+  width: 146px;
+  height: auto;
+  padding: 10px 10px 8px;
+  border-width: 1.5px;
+  border-radius: 13px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-proof > .lx-item-art {
+  height: 147px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-seal {
+  margin-top: 7px;
+  padding: 0 1px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-seal > .lx-example-qr {
+  width: 35px;
+  height: 35px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-card h3 {
+  min-height: 54px;
+  margin: 0 0 13px;
+  font: 400 25px/1.08 Georgia, "Times New Roman", serif;
+  letter-spacing: -.7px;
+}
+body.lockx-public .lx-home .lx-roi-hero .lx-fan-caption {
+  margin: 0;
+  color: var(--lx-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  body.lockx-public .lx-home .lx-roi-explainer { gap: 22px; }
+  body.lockx-public .lx-home .lx-roi-explainer > p { font-size: 14px; }
+  body.lockx-public .lx-home .lx-roi-actions > .lx-button {
+    min-width: 0;
+    padding: 16px 18px;
+    gap: 10px;
+    font-size: 13px;
+  }
+  body.lockx-public .lx-home .lx-roi-hero .lx-steps-fan ol { gap: 13px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-card {
+    padding: 18px 14px;
+  }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-art,
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-capture { height: 190px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-card h3 { font-size: 23px; }
+}
+
+@media (max-width: 580px) {
+  body.lockx-public #lockxPublicHeader .lx-header-cta { display: none; }
+  body.lockx-public #lockxPublicHeader #cwHeaderButton { margin-right: 0; }
+  body.lockx-public .lx-home .lx-roi-explainer { display: block; }
+  body.lockx-public .lx-home .lx-roi-explainer > p { font-size: 15px; line-height: 1.6; }
+  body.lockx-public .lx-home .lx-roi-actions { margin-top: 23px; text-align: left; }
+  body.lockx-public .lx-home .lx-roi-actions > .lx-button {
+    max-width: 100%;
+    padding: 18px 23px;
+    font-size: 14px;
+  }
+  body.lockx-public .lx-home .lx-roi-claim {
+    min-height: 0;
+    padding: 35px 0 26px;
+    text-align: left;
+  }
+  body.lockx-public .lx-home .lx-roi-claim > .lx-eyebrow {
+    margin-bottom: 18px;
+    font-size: 10px;
+    letter-spacing: 1.55px;
+  }
+  body.lockx-public .lx-home .lx-roi-claim h1 {
+    margin: 0;
+    font-size: clamp(34px, 10vw, 39px);
+    letter-spacing: -1.4px;
+  }
+  body.lockx-public .lx-home .lx-roi-claim h1 > .lx-roi-value {
+    margin-bottom: 15px;
+    font-size: 115px;
+    letter-spacing: -6px;
+  }
+  body.lockx-public .lx-home .lx-roi-tagline { font-size: 24px; }
+  body.lockx-public .lx-home .lx-roi-steps-title { max-width: 290px; margin-bottom: 20px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-steps-fan { max-width: 400px; margin: 0 auto 35px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-steps-fan ol {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 21px;
+    padding: 8px 4px;
+  }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-card {
+    padding: 23px 23px 25px;
+  }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-card:first-child { transform: rotate(-2deg); }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-card:last-child { transform: rotate(2deg); }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-number { font-size: 27px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-art { height: 216px; margin: 0 0 13px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-capture { max-width: 300px; height: 216px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-photos { height: 216px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-photos > .lx-item-art { top: 4px; height: 210px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-proof { width: 164px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-proof > .lx-item-art { height: 165px; }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-card h3 {
+    min-height: 0;
+    margin-bottom: 10px;
+    font-size: 27px;
+  }
+  body.lockx-public .lx-home .lx-roi-hero .lx-fan-caption { font-size: 14px; }
+}

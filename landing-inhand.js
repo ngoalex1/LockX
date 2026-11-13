@@ -56,19 +56,24 @@
 
   const markup = `
     <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
-      <div class="lx-hero lx-wrap lx-rose-hero">
-        <div class="lx-rose-header">
-          <div><p class="lx-eyebrow">Details make the difference.</p><h1 id="lxHeroTitle">Your photos.<br>Your item. <em>Confirmed.</em></h1></div>
-          <p class="lx-rose-intro">For the things you collect,<br>the stories you pass on,<br>and the details that matter.</p>
+      <div class="lx-hero lx-wrap lx-rose-hero lx-roi-hero">
+        <div class="lx-roi-explainer">
+          <p>LockX compares your listing photos with a fresh, 10-second video of the item in hand. Matched photos get a QR code buyers can scan to check the verification record.</p>
+          <div class="lx-roi-actions"><a class="lx-button" href="#in-hand">Verify your listing photos ${arrow}</a><small>50¢ per item check · Credit packs from $5</small></div>
+        </div>
+        <div class="lx-roi-claim" aria-labelledby="lxHeroTitle">
+          <p class="lx-eyebrow">LockX in-hand verification</p>
+          <h1 id="lxHeroTitle"><span class="lx-roi-value">45%</span>more buying confidence.<br>For just <em>50¢.</em></h1>
+          <p class="lx-roi-tagline">The best ROI in sales.</p>
         </div>
         <section class="lx-steps-fan" id="lxHowItWorks" aria-label="How LockX works in three steps">
+          <h2 class="lx-roi-steps-title">Three steps.<br>A listing buyers can check.</h2>
           <ol>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">01</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-photos">${pokemonCard('front','fan-photo-front').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}${pokemonCard('back','fan-photo-back').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}</div></div><h3>Take photos</h3></li>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">02</span><div class="lx-fan-art">${inHandCapture('fan-video')}</div><h3>Confirm with video</h3></li>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">03</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-proof">${pokemonCard('front','fan-proof').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<div class="lx-fan-seal"><span class="lx-fan-check">${check}</span>${qr()}</div></div></div><h3>Get verified</h3></li>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">01</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-photos">${pokemonCard('front','fan-photo-front').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}${pokemonCard('back','fan-photo-back').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}</div></div><h3>Take photos</h3><p class="lx-fan-caption">Add the photos you plan to list.</p></li>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">02</span><div class="lx-fan-art">${inHandCapture('fan-video')}</div><h3>Confirm with video</h3><p class="lx-fan-caption">Record the item in hand for 10 seconds.</p></li>
+            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">03</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-proof">${pokemonCard('front','fan-proof').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<div class="lx-fan-seal"><span class="lx-fan-check">${check}</span>${qr()}</div></div></div><h3>Get verified</h3><p class="lx-fan-caption">Save matched photos with a QR code buyers can check.</p></li>
           </ol>
         </section>
-        <div class="lx-steps-cta"><a class="lx-button" href="#in-hand">Verify your photos ${arrow}</a><p class="lx-hero-note">No app. No account. Just your photos and camera.</p></div>
         <p class="lx-rose-scope">Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</p>
       </div>
 
