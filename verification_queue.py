@@ -153,6 +153,45 @@ def enqueue(db, request_id, *, technical_retry=False):
     return public_status(db, request_id)
 
 
+def enqueue_matched_publication(db, request_id):
+    """Apply explicit subset consent and queue exports without another comparison.
+
+    The caller owns an IMMEDIATE transaction and has checked seller consent and
+    photo eligibility. Verify the old evidence before changing this one consent
+    flag; every item claim, saved byte and capture session must remain unchanged.
+    """
+    if not db.in_transaction:
+        raise RuntimeError("Publication consent requires a write transaction")
+    row = db.execute("SELECT * FROM ih_requests WHERE id=?", (request_id,)).fetchone()
+    job = db.execute("SELECT * FROM verification_jobs WHERE request_id=? AND session_id=?",
+                     (request_id, row["session_id"])).fetchone() if row else None
+    if not job or row["analysis_status"] != "complete":
+        raise HTTPException(409, "A completed saved comparison is required")
+    prior = db.execute("SELECT revoked FROM ih_publications WHERE request_id=?", (request_id,)).fetchone()
+    if prior and prior["revoked"] is not None:
+        raise HTTPException(409, "This record was withdrawn. Create a new inspection to publish again.")
+    manifest = json.loads(job["manifest"])
+    try:
+        unchanged = evidence_manifest(db, request_id, model=manifest["model"]) == manifest
+    except (ValueError, TypeError, KeyError):
+        unchanged = False
+    if not unchanged:
+        raise HTTPException(409, "Saved evidence changed; a new inspection is required")
+    listing = json.loads(row["listing"])
+    if listing.get("publish_matched_photos") is True:
+        return public_status(db, request_id)
+    listing["publish_matched_photos"] = True
+    db.execute("UPDATE ih_requests SET listing=? WHERE id=?", (json.dumps(listing), request_id))
+    updated = evidence_manifest(db, request_id, model=manifest["model"])
+    now = time.time()
+    # The completed assessment is retained. Workers select publication-only
+    # mode from analysis_status, and the new fence rejects an older renderer.
+    db.execute("""UPDATE verification_jobs SET manifest=?,state='queued',queued_at=?,updated_at=?,next_run=?,
+        attempts=0,fence=fence+1,lease_owner=NULL,lease_until=NULL,reason=NULL WHERE id=?""",
+               (json.dumps(updated), now, now, now, job["id"]))
+    return public_status(db, request_id)
+
+
 def ensure_current(db, claim, *, verify_evidence=True):
     row = db.execute("SELECT * FROM verification_jobs WHERE id=?", (claim["id"],)).fetchone()
     if (not row or row["state"] != "running" or row["fence"] != claim["fence"] or row["lease_owner"] != claim["lease_owner"]

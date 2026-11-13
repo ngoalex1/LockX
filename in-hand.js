@@ -8,6 +8,33 @@
   const date = t => t ? new Date(t * 1000).toLocaleString(undefined, {dateStyle:'medium', timeStyle:'short'}) : 'Not recorded';
   const labels = {waiting:'Awaiting capture',capturing:'Capture started',processing:'Comparing evidence',confirmed:'In-hand confirmed',mismatch:'Mismatch found',inconclusive:'More evidence needed',expired:'Link expired'};
   const scope = 'This records a visual match at the capture time. It does not certify product authenticity, ownership, current possession, ticket validity, or delivery.';
+  const queueStates = new Set(['queued','running','retrying','budget_wait','completed','failed']);
+  const savedSubmissions = new Map();
+  function queueInfo(record) {
+    const queue=record?.queue;
+    return queue&&queueStates.has(queue.state)&&Number.isFinite(queue.queued_at)&&queue.queued_at>0?queue:null;
+  }
+  function queuePresentation(record) {
+    const queue=queueInfo(record);if(!queue)return null;
+    const details={
+      queued:['Waiting for comparison.','Your submission is in line. LockX will compare it when a worker is available.'],
+      running:['Checking your item.','LockX is comparing your saved photos and video.'],
+      retrying:['Retrying your comparison.','A temporary processing issue interrupted the check. LockX will retry your saved submission automatically. No new recording is needed.'],
+      budget_wait:['Your submission is saved.','Comparison is paused until processing capacity is available. Your place is kept, and LockX will continue automatically. No new recording is needed.'],
+      completed:['Your comparison is complete.','Your saved result is ready below.'],
+      failed:['Comparison could not finish.','A technical issue prevented this comparison from finishing. No new recording is needed. Open your saved record to check the result or retry the comparison.']
+    }[queue.state];
+    let detail=details[1];
+    if(queue.state==='queued'&&Number.isInteger(queue.position)&&queue.position>0)detail+=` Position in line: ${queue.position}.`;
+    if(queue.state==='queued'&&Number.isFinite(queue.estimated_wait_seconds)&&queue.estimated_wait_seconds>0)detail+=` Estimated wait: about ${Math.max(1,Math.ceil(queue.estimated_wait_seconds/60))} ${queue.estimated_wait_seconds>60?'minutes':'minute'}. Timing can change.`;
+    return {queue,title:details[0],detail,pending:['queued','running','retrying','budget_wait'].includes(queue.state)};
+  }
+  function savedSubmissionBox(record) {
+    const info=queuePresentation(record);if(!info)return '';
+    return `<section class="ih-queue-note" aria-label="Submission status" role="status"><strong>Submission saved. You can close this page.</strong><p>${esc(info.detail)}</p><p>Keep this private link to return to your result, or open your verifications on the same signed-in account or device.</p><a class="ih-button text" href="#in-hand">Your verifications →</a></section>`;
+  }
+  function recordLabel(record){const info=queuePresentation(record);return info&&(info.pending||info.queue.state==='failed')?info.title:labels[record.status]||record.status;}
+  function queueKicker(record){return {queued:'Submission saved · Waiting in line',running:'Camera off · Comparing your photos',retrying:'Submission saved · Automatic retry',budget_wait:'Submission saved · Waiting for capacity',failed:'Submission saved · Comparison interrupted'}[queueInfo(record)?.state]||'';}
   let photos = [], capabilities = null, routeNumber = 0, poll = null, reportURLs = [], capture = null, sellerData = null, sellerToken = null, isStandalone = false;
   let managementKey = '', reportRenderNumber = 0, captureStartNumber = 0;
   const reportMedia = new Map();
@@ -67,7 +94,7 @@
     reportMedia.set(id,pending);
     try{return await pending;}catch(error){if(reportMedia.get(id)===pending)reportMedia.delete(id);throw error;}
   }
-  function reportFingerprint(record){return JSON.stringify([record.status,record.analysis_status,record.submitted,record.media.map(m=>[m.id,m.role,m.sha256]),record.publication,record.publication_status]);}
+  function reportFingerprint(record){return JSON.stringify([record.status,record.analysis_status,record.submitted,record.queue,record.media.map(m=>[m.id,m.role,m.sha256]),record.publication,record.publication_status]);}
   function pollReport(id,route,record,delay=1800){
     clearTimeout(poll);if((record.status!=='processing'&&record.publication_status!=='pending')||route!==routeNumber)return;const render=reportRenderNumber;
     poll=setTimeout(async()=>{
@@ -181,7 +208,7 @@
       const records = await (await api('/requests',{},true)).json();
       if (!container.isConnected) return;
       $('#ihHistory').hidden = records.length === 0;
-      container.innerHTML = records.length ? records.map(r=>`<article class="ih-request"><div><strong>${esc(r.title)}</strong><small>${r.media.filter(m=>m.role==='listing').length} selected photos · ${esc(date(r.created))}</small></div><div class="ih-request-actions"><span class="ih-status ${esc(r.status)}">${esc(labels[r.status]||r.status)}</span><a class="ih-button text" href="#in-hand/${esc(reportPath(r))}">View record →</a></div></article>`).join('') : '<div class="ih-empty">Your first photo-to-item inspection starts above.<br>Completed captures and their findings will appear here.</div>';
+      container.innerHTML = records.length ? records.map(r=>`<article class="ih-request"><div><strong>${esc(r.title)}</strong><small>${r.media.filter(m=>m.role==='listing').length} selected photos · ${esc(date(r.created))}</small></div><div class="ih-request-actions"><span class="ih-status ${esc(r.status)}">${esc(recordLabel(r))}</span><a class="ih-button text" href="#in-hand/${esc(reportPath(r))}">View record →</a></div></article>`).join('') : '<div class="ih-empty">Your first photo-to-item inspection starts above.<br>Completed captures and their findings will appear here.</div>';
     } catch (error) { if ($('#ihHistory')) $('#ihHistory').hidden = false; container.innerHTML = notice(error.message,'error'); }
   }
   async function showReport(id, route,record=null) {
@@ -191,9 +218,9 @@
       const r = record||await (await api('/requests/' + encodeURIComponent(id),{},true)).json();
       if (route !== routeNumber||render!==reportRenderNumber) return;
       const refs = r.media.filter(m=>m.role==='listing'), frames = r.media.filter(m=>m.role==='frame'), video = r.media.find(m=>m.role==='video'), visual = r.analysis?.visual;
-      const findings = new Map((visual?.photos||[]).map(p=>[p.photo_index,p])),eligible=eligiblePhotoIndices(r,refs.length),privateCards=photoResultCards({refs,findings,eligible,pending:r.status==='processing'});
-      const canRetry = ['unavailable','failed'].includes(r.analysis_status);
-      page.innerHTML = `<div class="ih-report-head"><div><a class="ih-button text" href="#in-hand">← All inspections</a><p class="ih-kicker">Private evidence record · ${esc(r.id.slice(0,8))}</p><h1>${esc(r.title)}</h1><span class="ih-status ${esc(r.status)}">${esc(labels[r.status]||r.status)}</span></div><button class="ih-button secondary" id="ihExport">Export evidence record ↓</button></div>${notice(r.analysis?.summary || (r.status==='expired'?'This link expired before a recording was submitted. Create a new inspection to capture fresh evidence.':'Send the mobile link to the person holding the item.'))}${canRetry?`<p>${notice('Automated comparison has not established a match. No verified marking is available for this capture.','warning')}</p><button class="ih-button secondary" id="ihRetryAnalysis">Try comparison again</button>`:''}${['waiting','capturing'].includes(r.status)?linkBox(r):''}${(r.publication||eligible.size)?publicationBox(r):''}<div id="ihReportError" class="ih-note error" hidden></div><div class="ih-section-title"><h2>Selected photos · ${refs.length}</h2></div><div class="ih-evidence-grid">${privateCards}</div>${video?`<div class="ih-section-title"><h2>Camera evidence</h2></div><button class="ih-button secondary" id="ihLoadVideo">Load recording ▶</button><div id="ihVideo"></div><div class="ih-frame-row">${frames.map((f,i)=>`<figure><img data-private="${f.id}" loading="lazy" alt="Capture frame ${i+1}"><figcaption>Frame ${i+1} · ${f.seconds}s<br>${esc(f.label)}</figcaption></figure>`).join('')}</div>`:''}${visual?.claims.length?`<div class="ih-section-title"><h2>Written claims</h2></div><ul class="ih-findings">${visual.claims.map(c=>`<li><strong>${esc(c.subject)} · ${esc({supported:'Supported',contradicted:'Contradicted',not_established:'Not established'}[c.finding])}</strong>${esc(c.evidence)}</li>`).join('')}</ul>`:''}${visual?.concerns.length?notice(visual.concerns.join(' '),'warning'):''}<p class="ih-note" style="margin-top:25px">${esc(scope)} Browser camera evidence is not hardware-attested.</p>`;
+      const findings = new Map((visual?.photos||[]).map(p=>[p.photo_index,p])),eligible=eligiblePhotoIndices(r,refs.length),privateCards=photoResultCards({refs,findings,eligible,pending:r.status==='processing',queue:r.queue});
+      const queue=queuePresentation(r),canRetry = ['unavailable','failed'].includes(r.analysis_status)&&!queue?.pending;
+      page.innerHTML = `<div class="ih-report-head"><div><a class="ih-button text" href="#in-hand">← All inspections</a><p class="ih-kicker">Private evidence record · ${esc(r.id.slice(0,8))}</p><h1>${esc(r.title)}</h1><span class="ih-status ${esc(r.status)}">${esc(recordLabel(r))}</span></div><button class="ih-button secondary" id="ihExport">Export evidence record ↓</button></div>${queue?savedSubmissionBox(r):notice(r.analysis?.summary || (r.status==='expired'?'This link expired before a recording was submitted. Create a new inspection to capture fresh evidence.':'Send the mobile link to the person holding the item.'))}${canRetry?`<p>${notice('Automated comparison has not established a match. No verified marking is available for this capture.','warning')}</p><button class="ih-button secondary" id="ihRetryAnalysis">Try comparison again</button>`:''}${['waiting','capturing'].includes(r.status)?linkBox(r):''}${(r.publication||eligible.size)?publicationBox(r):''}<div id="ihReportError" class="ih-note error" hidden></div><div class="ih-section-title"><h2>Selected photos · ${refs.length}</h2></div><div class="ih-evidence-grid">${privateCards}</div>${video?`<div class="ih-section-title"><h2>Camera evidence</h2></div><button class="ih-button secondary" id="ihLoadVideo">Load recording ▶</button><div id="ihVideo"></div><div class="ih-frame-row">${frames.map((f,i)=>`<figure><img data-private="${f.id}" loading="lazy" alt="Capture frame ${i+1}"><figcaption>Frame ${i+1} · ${f.seconds}s<br>${esc(f.label)}</figcaption></figure>`).join('')}</div>`:''}${visual?.claims.length?`<div class="ih-section-title"><h2>Written claims</h2></div><ul class="ih-findings">${visual.claims.map(c=>`<li><strong>${esc(c.subject)} · ${esc({supported:'Supported',contradicted:'Contradicted',not_established:'Not established'}[c.finding])}</strong>${esc(c.evidence)}</li>`).join('')}</ul>`:''}${visual?.concerns.length?notice(visual.concerns.join(' '),'warning'):''}<p class="ih-note" style="margin-top:25px">${esc(scope)} Browser camera evidence is not hardware-attested.</p>`;
       $('.ih-report-head').insertAdjacentHTML('afterend',`<details class="ih-result-details"><summary>Private management link</summary>${managementBox(r)}</details>`);
       bindLinkButtons(page);bindMarkedDownloads(page);
       $('#ihExport').onclick = async()=>{try{download(await (await api('/requests/'+r.id+'/evidence',{},true)).blob(),'lockx-'+r.id.slice(0,8)+'-evidence.json');}catch(error){errorAt('#ihReportError',error);}};
@@ -220,8 +247,8 @@
     if(record.status==='confirmed'||record.status==='verified')return new Set(Array.from({length:total},(_,index)=>index));
     return new Set();
   }
-  function photoState(finding,eligible,pending=false) {
-    if(pending)return {kind:'pending',symbol:'…',label:'Comparing…'};
+  function photoState(finding,eligible,pending=false,pendingLabel='Comparing…') {
+    if(pending)return {kind:'pending',symbol:'…',label:pendingLabel};
     if(eligible)return {kind:'passed',symbol:'✓',label:'Verified match'};
     if(finding?.finding==='contradicted')return {kind:'failed',symbol:'×',label:'Did not match'};
     return {kind:'unclear',symbol:'?',label:finding?.finding==='supported'?'Match found; verification not established':'Not verified'};
@@ -232,12 +259,13 @@
   function markedSaveButton(publication,photo,index) {
     return `<button type="button" class="ih-button secondary" data-save-marked-photo="/public/${encodeURIComponent(publication.id)}/photos/${encodeURIComponent(photo.id)}" data-photo-index="${index}" data-download-name="lockx-${esc(publication.id)}-photo-${index+1}.jpg" disabled>Save photo ${index+1}</button>`;
   }
-  function photoResultCards({refs,findings,eligible,publication=null,referenceURL=null,pending=false}) {
+  function photoResultCards({refs,findings,eligible,publication=null,referenceURL=null,pending=false,queue=null}) {
     const marked=new Map((publication?.photos||[]).map((photo,index)=>[publicationPhotoIndex(publication,photo,index),photo]));
+    const waiting=queueInfo({queue})?{queued:['Waiting for comparison','This photo is saved and waiting in line.'],retrying:['Waiting for automatic retry','Your saved recording will be compared again. No new recording is needed.'],budget_wait:['Waiting for capacity','This photo stays saved. Comparison will continue automatically.']}[queue.state]:null;
     return refs.map((photo,index)=>{
-      const finding=findings.get(index),approved=eligible.has(index),mark=approved?marked.get(index):null,state=photoState(finding,approved,pending);
+      const finding=findings.get(index),approved=eligible.has(index),mark=approved?marked.get(index):null,state=photoState(finding,approved,pending,waiting?.[0]||'Comparing…');
       const image=mark?`data-marked-photo="/public/${encodeURIComponent(publication.id)}/photos/${encodeURIComponent(mark.id)}"`:referenceURL?`src="${esc(referenceURL(photo))}"`:`data-private="${esc(photo.id)}"`;
-      const evidence=pending?'Checking against frames from your recording.':finding?.evidence||'The recording did not establish this photo match.';
+      const evidence=pending?waiting?.[1]||'Checking against frames from your recording.':finding?.evidence||'The recording did not establish this photo match.';
       return `<figure class="ih-photo-result ih-photo-result--${state.kind}" data-result-photo-index="${index}"><div class="ih-photo-result-image"><img ${image} alt="Photo ${index+1}${mark?' with LockX verified marking and QR code':''}">${photoStatusBadge(state)}</div><figcaption><strong>Photo ${index+1} · ${esc(state.label)}</strong><span>${esc(evidence)}</span>${mark?markedSaveButton(publication,mark,index):!pending&&!approved?'<small class="ih-photo-unverified-note">No verified marking or QR code.</small>':''}</figcaption></figure>`;
     }).join('');
   }
@@ -382,17 +410,18 @@
     try{
       const result=await(await api('/seller/'+encodeURIComponent(token)+'/result',{signal:controller.signal})).json();
       if(route!==routeNumber||render!==sellerResultNumber)return;
+      const queue=queuePresentation(result);if(queue)savedSubmissions.set(token,result.queue);
       const count=result.total_count||sellerData?.media.length||result.photos.length,eligible=eligiblePhotoIndices(result,count),matched=eligible.size,partial=matched>0&&matched<count;
       const waitingForMarks=matched>0&&result.auto_publish&&result.publication_status==='pending';
-      const pending=result.status==='processing'||waitingForMarks;
+      const pending=result.status==='processing'||waitingForMarks||queue?.pending;
       const publishedIndices=new Set((result.publication?.photos||[]).map((photo,index)=>publicationPhotoIndex(result.publication,photo,index)));
       const ready=matched>0&&result.publication_status==='ready'&&[...eligible].every(index=>publishedIndices.has(index));
-      const title=ready?(partial?`${matched} of ${count} photos matched.`:'Your verified photos are ready.'):waitingForMarks?'Creating your QR-marked photos.':pending?`Comparing your ${count} photos.`:matched?`${matched} of ${count} photos matched.`:result.status==='mismatch'?'Some photos did not match.':'More evidence is needed.';
+      const title=ready?(partial?`${matched} of ${count} photos matched.`:'Your verified photos are ready.'):waitingForMarks?'Creating your QR-marked photos.':queue?.pending||queue?.queue.state==='failed'?queue.title:pending?`Comparing your ${count} photos.`:matched?`${matched} of ${count} photos matched.`:result.status==='mismatch'?'Some photos did not match.':'More evidence is needed.';
       const findings=new Map(result.photos.map(photo=>[photo.photo_index,photo]));
       const identifiers=sellerData?.capture_mode==='digital'?[]:(result.identifier_checks||[]);
       const numberChecks=identifiers.length?`<section class="ih-number-checks"><h2>Numbers & markings</h2>${identifiers.map(item=>`<article><header><strong>${esc(item.label)} · Photo ${item.photo_index+1}</strong><span>${esc({supported:'Matches',contradicted:'Different',not_established:'Unclear'}[item.finding]||'Unclear')}</span></header><div><p><small>IN PHOTO</small><code>${esc(item.reference_text||'Not readable')}</code></p><p><small>IN VIDEO</small><code>${esc(item.video_text||'Not readable')}</code></p></div><p>${esc(item.evidence)}</p></article>`).join('')}</section>`:'';
       const knownKey=browserAccess.records[result.id],ownerLink=secretPattern.test(knownKey||'')?appLink('report/'+result.id+'/'+knownKey):'';
-      const refs=sellerData?.media||[],cards=photoResultCards({refs,findings,eligible,publication:ready?result.publication:null,referenceURL:photo=>`${base}/seller/${encodeURIComponent(token)}/photos/${encodeURIComponent(photo.id)}`,pending:result.status==='processing'});
+      const refs=sellerData?.media||[],cards=photoResultCards({refs,findings,eligible,publication:ready?result.publication:null,referenceURL:photo=>`${base}/seller/${encodeURIComponent(token)}/photos/${encodeURIComponent(photo.id)}`,pending:result.status==='processing',queue:result.queue});
       const comparison=`<div class="ih-phone-photo-results ih-result-gallery">${cards}</div>`;
       const extraDetails=numberChecks+(ownerLink?`<a class="ih-button text" href="${esc(ownerLink)}">Private evidence & record controls →</a>`:'');
       const needsConsent=result.publication_status==='consent_required'&&matched>0;
@@ -400,7 +429,7 @@
       const publicationNote=result.publication_status==='withdrawn'?notice('The public verification record was withdrawn. Its photos no longer carry an active verification record.','warning'):result.publication_status==='failed'?notice('The QR images could not be prepared. Your comparison and recording are saved.','warning'):'';
       const retryReason=qualityRetryReason(result),retryBox=retryReason?`<div class="ih-card ih-quality-retry"><h2>${retryReason==='low_light'?'The video was too dark.':'The video was too blurred.'}</h2><p>Use the same photos in a fresh 10-second recording. Hold steady. The camera light turns on for 5 seconds, then off for 5 seconds where available. Your first recording stays saved. Continuing consents to a new recording and comparison.</p><button type="button" class="ih-button ih-wide" id="ihRetryWithLight">Record again with light</button><div id="ihQualityRetryError" class="ih-note error" role="alert" hidden></div></div>`:'';
       const readySummary=partial?`Save the ${matched} verified photos with QR codes. The other ${count-matched} ${count-matched===1?'photo is':'photos are'} unverified and excluded from saving and the public record.`:'Your QR-marked images are ready to save and use in your listing. Each QR code opens this photo set’s LockX verification record.';
-      shell(`<div class="ih-standalone-content ih-phone-results"><span class="ih-kicker">${ready?(partial?`✓ ${matched} of ${count} photos verified`:'✓ All photos matched'):`Camera off · ${waitingForMarks?'Preparing verified photos':pending?'AI comparison in progress':'Photo-by-photo result'}`}</span><h1>${esc(title)}</h1><p>${ready?esc(readySummary):esc(result.summary)}</p>${pending?notice(Date.now()-started>90000?'This is taking longer than usual. Your camera is off and the recording is saved. This page will update automatically.':waitingForMarks?`Adding verified markings and QR codes to ${matched} approved ${matched===1?'photo':'photos'} now…`:result.auto_publish?'LockX is checking every photo against the recording. Each approved photo will appear here with its QR code automatically.':'LockX is checking every photo against the recording. This page updates automatically.'):''}${publicationNote}${subsetConsent}${retryBox}${ready?verifiedPhotoSet(result.publication,{cards,total:count,eligible}):comparison}${ready&&!partial?`<details class="ih-result-details"><summary>Comparison details</summary>${extraDetails}</details>`:extraDetails}${result.publication_status==='failed'&&ownerLink?`<p><a class="ih-button secondary ih-wide" href="${esc(ownerLink)}">Open saved record</a></p>`:''}<p class="ih-note">${esc(result.scope||scope)}</p></div>`);
+      shell(`<div class="ih-standalone-content ih-phone-results"><span class="ih-kicker">${ready?(partial?`✓ ${matched} of ${count} photos verified`:'✓ All photos matched'):queueKicker(result)||`Camera off · ${waitingForMarks?'Preparing verified photos':pending?'AI comparison in progress':'Photo-by-photo result'}`}</span><h1>${esc(title)}</h1>${queue?.pending?'':`<p>${ready?esc(readySummary):esc(result.summary)}</p>`}${queue?savedSubmissionBox(result):pending?notice(waitingForMarks?`Adding verified markings and QR codes to ${matched} approved ${matched===1?'photo':'photos'} now…`:'LockX is comparing your photos and video. This page updates automatically.'):''}${publicationNote}${subsetConsent}${retryBox}${ready?verifiedPhotoSet(result.publication,{cards,total:count,eligible}):comparison}${ready&&!partial?`<details class="ih-result-details"><summary>Comparison details</summary>${extraDetails}</details>`:extraDetails}${result.publication_status==='failed'&&ownerLink?`<p><a class="ih-button secondary ih-wide" href="${esc(ownerLink)}">Open saved record</a></p>`:''}<p class="ih-note">${esc(result.scope||scope)}</p></div>`);
       bindLinkButtons(standalone);bindMarkedDownloads(standalone);
       if($('#ihPrepareMatched'))$('#ihPrepareMatched').onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{await json('/seller/'+encodeURIComponent(token)+'/enable-matched-photos',{publish_matched_photos:true,consent:true});if(route===routeNumber)showSellerResult(token,route,started);}catch(error){errorAt('#ihSubsetConsentError',error);button.disabled=false;}};
       if($('#ihRetryWithLight'))$('#ihRetryWithLight').onclick=async event=>{
@@ -415,7 +444,7 @@
       else closeSellerEvents();
     }catch(error){
       if(route!==routeNumber||render!==sellerResultNumber)return;
-      shell(`<div class="ih-standalone-content"><span class="ih-kicker">Camera off · recording received</span><h1>Checking your result.</h1>${notice(error.message,'warning')}<p>Your recording has been sent. Keep this private camera link to return to the comparison.</p><button class="ih-button ih-wide" id="ihRefreshSellerResult">Check again</button></div>`);
+      shell(`<div class="ih-standalone-content"><span class="ih-kicker">Camera off</span><h1>Checking your result.</h1>${savedSubmissions.has(token)?savedSubmissionBox({queue:savedSubmissions.get(token)}):'<p>The result could not be loaded. Keep this private link and check again.</p>'}${notice(error.message,'warning')}<button class="ih-button ih-wide" id="ihRefreshSellerResult">Check again</button></div>`);
       $('#ihRefreshSellerResult').onclick=()=>showSellerResult(token,route,started);
       poll=setTimeout(()=>showSellerResult(token,route,started),5000);
     }finally{clearTimeout(timeout);if(sellerResultRequest===controller)sellerResultRequest=null;}
@@ -629,7 +658,7 @@
     catch(error){try{current.recorder.stop();}catch{}current.stream.getTracks().forEach(track=>{try{track.stop();}catch{}});captureFailed('The camera is off, but the recording could not be saved. Reload this page and record again.');return;}
     current.layoutObserver?.disconnect();window.removeEventListener('resize',current.layoutHandler);window.visualViewport?.removeEventListener('resize',current.layoutHandler);
     document.body.classList.remove('ih-scanning');
-    shell(`<div class="ih-standalone-content"><span class="ih-kicker">Camera off · saving your 10-second video</span><h1>Recording finished.</h1><p>Sending the recording, then comparing it with all ${sellerData.media.length} selected photos. Keep this page open to see each result.</p><progress id="ihUploadProgress" class="ih-upload-progress" max="100" value="0"></progress><p id="ihUploadLabel">Saving the last video frame…</p><div id="ihUploadError" class="ih-note error" hidden></div><button class="ih-button ih-wide" id="ihRetryUpload" hidden>Retry upload · no new recording needed</button><p class="ih-scan-target">Recording has stopped. Upload and AI comparison can take longer on a slow connection.</p></div>`);
+    shell(`<div class="ih-standalone-content"><span class="ih-kicker">Camera off · saving your 10-second video</span><h1>Recording finished.</h1><p>Sending the recording, then comparing it with all ${sellerData.media.length} selected photos. Keep this page open until LockX confirms your submission is saved.</p><progress id="ihUploadProgress" class="ih-upload-progress" max="100" value="0"></progress><p id="ihUploadLabel">Saving the last video frame…</p><div id="ihUploadError" class="ih-note error" hidden></div><button class="ih-button ih-wide" id="ihRetryUpload" hidden>Retry upload · no new recording needed</button><p class="ih-scan-target">Recording has stopped. Upload and AI comparison can take longer on a slow connection.</p></div>`);
     try{await saved;}catch(error){if(activeCapture(current))captureFailed(error.message);return;}
     if(!activeCapture(current))return;current.sampleCanvas=null;current.previousFrame=null;
     $('#ihRetryUpload').onclick=()=>uploadCapture(current);await uploadCapture(current);
@@ -641,8 +670,11 @@
       if(current.queue.length||current.uploadPaused)throw current.uploadError||Error('The connection paused. Keep this page open and retry.');
       if(!current.uploadedCount)throw Error('The browser did not save any video. Please start a fresh scan.');
       renderUploadStatus(current);current.progressRequest=new AbortController();current.finalizeTimer=setTimeout(()=>current.progressRequest?.abort(),30000);
-      try{await api('/seller/'+sellerToken+'/scan/finish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:current.sessionID,consent:true,source:'browser_camera',chunk_count:current.uploadedCount,recording_seconds:current.recordingSeconds}),signal:current.progressRequest.signal});}
-      catch(error){if(error.status!==409)throw error;const state=await(await api('/seller/'+sellerToken)).json();if(['waiting','capturing'].includes(state.status))throw error;}
+      let receipt;
+      try{receipt=await(await api('/seller/'+sellerToken+'/scan/finish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:current.sessionID,consent:true,source:'browser_camera',chunk_count:current.uploadedCount,recording_seconds:current.recordingSeconds}),signal:current.progressRequest.signal})).json();}
+      catch(error){if(error.status!==409)throw error;receipt=await(await api('/seller/'+sellerToken)).json();if(['waiting','capturing'].includes(receipt.status))throw error;}
+      if(!queueInfo(receipt))throw Error('Your upload was sent, but saving has not been confirmed. Keep this page open and retry the upload. No new recording is needed.');
+      savedSubmissions.set(sellerToken,receipt.queue);
       if(!activeCapture(current))return;current.queue=[];capture=null;
       await showSellerResult(sellerToken,current.route);
     }catch(error){if(activeCapture(current)){errorAt('#ihUploadError',error);$('#ihRetryUpload').hidden=false;renderUploadStatus(current);}}

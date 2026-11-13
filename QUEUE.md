@@ -88,6 +88,13 @@ committed, recovery resumes photo marking only. Existing completed comparison
 credit consumption stays intact; interrupted or terminal technical failure
 restores only a reserved credit, once.
 
+An explicit approval to publish individually matched photos validates the full
+saved manifest before changing only that consent flag. The existing job is
+requeued with a new fence for publication only; its completed comparison,
+original capture time and credit settlement remain intact. Repeated approval
+does not create another job. Evidence or item-claim changes and withdrawn
+records remain blocked.
+
 ## Status and operations
 
 Seller/owner receipts and result polling include `queue` with the states

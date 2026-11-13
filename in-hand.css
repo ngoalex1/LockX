@@ -435,3 +435,10 @@ body.ih-scanning,
   .ih-photo-result-image > .ih-photo-status { width: 30px; height: 30px; top: 8px; right: 8px; font-size: 21px; }
   .ih-photo-result figcaption > span { font-size: 11px; }
 }
+
+/* Server-confirmed saved submissions; no local upload is described as safely saved. */
+.ih-queue-note{margin:18px 0 22px;padding:18px;border:1px solid #c6d8ca;border-radius:14px;background:#f0f6f0;color:#284e38;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.ih-queue-note>strong{display:block;font-size:14px;line-height:1.5}
+.ih-queue-note>p{margin:9px 0 0;color:inherit;font-size:13px;line-height:1.6}
+.ih-queue-note .ih-button.text{margin:8px 0 0;min-height:44px;padding:9px 0;color:#285c3d;text-align:left;white-space:normal}
+@media(max-width:580px){.ih-queue-note{padding:15px}.ih-request-actions .ih-status{white-space:normal;max-width:145px;line-height:1.4}.ih-request>div:first-child{min-width:0}.ih-request strong{overflow-wrap:anywhere}}

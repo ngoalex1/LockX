@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import credit_wallet as credits
 import in_hand
@@ -419,4 +421,121 @@ def test_recovered_publication_cannot_be_abandoned_as_completed_queue_work(clock
     # A completed durable job will not be rescheduled by subsequent result GETs.
     # It must not leave the export in an unrecoverable pending state.
     assert not (job == "completed" and publication in {"pending", "processing"})
+
+
+def partial_comparison_with_old_consent(state):
+    request_id, session_id = queued_inspection()
+    with queue.database() as db:
+        in_hand.store_media(db, request_id, "listing", "image/jpeg", b"second-private-reference")
+        db.execute("UPDATE verification_jobs SET manifest=? WHERE request_id=?",
+                   (json.dumps(queue.evidence_manifest(db, request_id)), request_id))
+    claim = queue.claim_job("comparison-worker")
+    comparison_ready(request_id)
+    assessment = matching_assessment().model_dump()
+    assessment["same_item"] = "inconclusive"
+    assessment["photos"].append({"photo_index": 1, "finding": "not_established",
+                                 "evidence": "This view was not established.", "frame_indices": [0]})
+    with queue.database() as db:
+        analysis = {"visual": assessment, "result": "inconclusive",
+                    "video": {"notes": [], "frame_selection": {"selected_frame_indices": [0]}}}
+        db.execute("UPDATE ih_requests SET analysis_status='complete',status='inconclusive',analysis=? WHERE id=?",
+                   (json.dumps(analysis), request_id))
+        credits.settle_check(db, request_id)
+        token = db.execute("SELECT token FROM ih_requests WHERE id=?", (request_id,)).fetchone()[0]
+        if state == "queued":
+            db.execute("UPDATE verification_jobs SET state='queued',lease_owner=NULL,lease_until=NULL WHERE id=?",
+                       (claim["id"],))
+    if state == "completed":
+        assert queue.finish_job(claim)
+    return request_id, session_id, token, claim
+
+
+def consent_client():
+    app = FastAPI()
+    app.include_router(in_hand.create_router(lambda authorization: OWNER))
+    return TestClient(app)
+
+
+def approve_subset(client, token):
+    return client.post("/api/v1/in-hand/seller/" + token + "/enable-matched-photos",
+                       json={"publish_matched_photos": True, "consent": True})
+
+
+@pytest.mark.parametrize("state", ["queued", "running", "completed"])
+def test_subset_consent_requeues_publication_only_without_ai_or_new_debit(clock, monkeypatch, state):
+    import verification_worker
+    request_id, _, token, previous = partial_comparison_with_old_consent(state)
+    if state == "completed":
+        clock[0] += 3600  # Approval time must not replace the earlier capture time.
+    with queue.database() as db:
+        original_media = [tuple(row) for row in db.execute(
+            "SELECT id,role,content,sha256 FROM ih_media WHERE request_id=? ORDER BY rowid", (request_id,))]
+        balance = db.execute("SELECT balance FROM credit_wallets WHERE owner_id=?", (OWNER,)).fetchone()[0]
+    def no_comparison(*args, **kwargs):
+        raise AssertionError("Publication consent must never rerun the AI assessment")
+    monkeypatch.setattr(in_hand, "vision_call", no_comparison)
+    monkeypatch.setattr(in_hand, "render_publication", lambda *args: ("approved-subset-publication", {0: b"approved-photo"}))
+    with consent_client() as client:
+        response = approve_subset(client, token)
+        assert response.status_code == 200, response.text
+        assert response.json()["queue"]["state"] == "queued"
+        with queue.database() as db:
+            job = dict(db.execute("SELECT * FROM verification_jobs WHERE request_id=?", (request_id,)).fetchone())
+            request = db.execute("SELECT listing,analysis_status FROM ih_requests WHERE id=?", (request_id,)).fetchone()
+        assert job["fence"] > previous["fence"] and job["lease_owner"] is None
+        assert request["analysis_status"] == "complete"
+        assert json.loads(request["listing"])["publish_matched_photos"] is True
+        assert json.loads(job["manifest"])["captured_at"] == NOW
+        # A repeat approval does not reset the lease generation or enqueue twice.
+        assert approve_subset(client, token).status_code == 200
+        with queue.database() as db:
+            repeated = db.execute("SELECT fence,queued_at FROM verification_jobs WHERE id=?", (job["id"],)).fetchone()
+            with pytest.raises(queue.LeaseLost):
+                queue.ensure_current(db, previous)
+        assert repeated["fence"] == job["fence"] and repeated["queued_at"] == job["queued_at"]
+    assert verification_worker.run_once("publication-only-worker")
+    with queue.database() as db:
+        assert db.execute("SELECT state FROM verification_jobs WHERE request_id=?", (request_id,)).fetchone()[0] == "completed"
+        assert db.execute("SELECT balance FROM credit_wallets WHERE owner_id=?", (OWNER,)).fetchone()[0] == balance
+        assert db.execute("SELECT state FROM credit_checks WHERE request_id=?", (request_id,)).fetchone()[0] == "consumed"
+        assert db.execute("SELECT COUNT(*) FROM credit_ledger WHERE kind='verification'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM verification_calls").fetchone()[0] == 0
+        assert [row[0] for row in db.execute("SELECT photo_index FROM ih_publication_photos")] == [0]
+        retained = [tuple(row) for row in db.execute(
+            "SELECT id,role,content,sha256 FROM ih_media WHERE request_id=? AND role!='marked' ORDER BY rowid", (request_id,))]
+    assert retained == original_media
+
+
+@pytest.mark.parametrize("tamper", ["listing", "media"])
+def test_publication_consent_cannot_reseal_changed_item_evidence(clock, tamper):
+    request_id, _, token, _ = partial_comparison_with_old_consent("completed")
+    with queue.database() as db:
+        before = dict(db.execute("SELECT * FROM verification_jobs WHERE request_id=?", (request_id,)).fetchone())
+        if tamper == "listing":
+            listing = json.loads(db.execute("SELECT listing FROM ih_requests WHERE id=?", (request_id,)).fetchone()[0])
+            listing["description"] = "A different item claim after comparison"
+            db.execute("UPDATE ih_requests SET listing=? WHERE id=?", (json.dumps(listing), request_id))
+        else:
+            replacement = b"a different reference with an updated stored hash"
+            db.execute("UPDATE ih_media SET content=?,sha256=? WHERE request_id=? AND role='listing'",
+                       (replacement, hashlib.sha256(replacement).hexdigest(), request_id))
+    with consent_client() as client:
+        result = approve_subset(client, token)
+    assert result.status_code == 409, result.text
+    with queue.database() as db:
+        after = dict(db.execute("SELECT * FROM verification_jobs WHERE request_id=?", (request_id,)).fetchone())
+        listing = json.loads(db.execute("SELECT listing FROM ih_requests WHERE id=?", (request_id,)).fetchone()[0])
+    assert after == before and listing["publish_matched_photos"] is False
+
+
+def test_publication_consent_cannot_revive_a_withdrawn_record(clock):
+    request_id, _, token, _ = partial_comparison_with_old_consent("completed")
+    with queue.database() as db:
+        db.execute("INSERT INTO ih_publications VALUES (?,?,?,?)", ("withdrawn-publication", request_id, NOW, NOW))
+    with consent_client() as client:
+        result = approve_subset(client, token)
+    assert result.status_code == 409
+    with queue.database() as db:
+        assert db.execute("SELECT state FROM verification_jobs WHERE request_id=?", (request_id,)).fetchone()[0] == "completed"
+        assert db.execute("SELECT revoked FROM ih_publications WHERE request_id=?", (request_id,)).fetchone()[0] == NOW
 

@@ -2104,13 +2104,17 @@ def create_router(authenticate):
                 raise HTTPException(409,"This record was withdrawn. Create a new inspection to publish again.")
             if not eligibility["verified_count"]:
                 raise HTTPException(409,"No matched photos are available to publish")
-            if listing.get("publish_matched_photos") is not True:
+            changed_consent = listing.get("publish_matched_photos") is not True
+            queue = verification_queue.enqueue_matched_publication(db,row["id"]) if verification_queue.has_job(db,row["id"]) else None
+            if changed_consent and queue is None:
                 listing["publish_matched_photos"] = True
                 db.execute("UPDATE ih_requests SET listing=? WHERE id=?",(json.dumps(listing),row["id"]))
+            if changed_consent:
                 event(db,row["id"],"Seller explicitly allowed publication of individually matched photos")
             refreshed = db.execute("SELECT * FROM ih_requests WHERE id=?",(row["id"],)).fetchone()
-            schedule_publication(db,refreshed,background)
-            return {**eligibility,**seller_publication(db,refreshed)}
+            if queue is None:
+                schedule_publication(db,refreshed,background)
+            return {**eligibility,**seller_publication(db,refreshed),**({"queue":queue} if queue else {})}
 
     @router.get("/seller/{token}/marked-photos")
     def seller_marked_download(token: str):

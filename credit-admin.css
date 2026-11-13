@@ -121,3 +121,13 @@
   #admin .ca-campaign-output{grid-template-columns:minmax(0,1fr);gap:10px}
   #admin .ca-campaign-output .ca-button{justify-self:start}
 }
+
+#admin .ca-queue{margin-top:32px;padding-top:28px;border-top:1px solid var(--ca-line)}
+#admin .ca-queue-budget{padding:20px;margin-top:18px}
+#admin .ca-queue-budget dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:17px 0}
+#admin .ca-queue-budget dt{font-size:11px;color:var(--ca-muted)}
+#admin .ca-queue-budget dd{margin:7px 0 0;font-size:19px;color:var(--ca-ink);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#admin .ca-queue-jobs{margin-top:18px}
+#admin .ca-queue-table th,#admin .ca-queue-table td{min-width:115px}
+#admin .ca-queue-table th:first-child,#admin .ca-queue-table td:first-child{min-width:110px}
+@media(max-width:580px){#admin .ca-queue-budget{padding:17px}#admin .ca-queue-budget dl{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 12px}#admin .ca-queue-budget dd{font-size:19px}}
