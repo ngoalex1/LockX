@@ -6,6 +6,7 @@
   const base = API_BASE + '/credits';
   let config, authClient, authBoot, balance = null, selected = 'regular', polling, busy = false, googleBoot, appleBoot, paypalBoot, appleSession;
   let lastFocus, waitingCheckout, refreshNumber = 0, googlePurchase, paymentWarm;
+  let balanceLoading = false, balanceFailed = false, activeOwner = null, walletGeneration = 0, walletFlight = null, balanceWarm = null;
   const pendingKey = 'lockx.pendingCheckout';
   const attemptKey = 'lockx.checkoutAttempt';
   const scriptLoads = new Map();
@@ -30,17 +31,18 @@
   function active() { return config?.credits_required || window.LOCKX_CREDITS_PREVIEW; }
   async function initializeAuth() {
     if (!authBoot) authBoot = window.ensureLockXAuthClient().then(value => {
-      authClient = value; return value;
+      authClient = value;
+      // Invalidate old-account responses synchronously; never await SDK calls in this callback.
+      value.auth.onAuthStateChange?.((_event,current)=>adoptSession(current));
+      return value;
     }).catch(error => {authBoot=null;throw error;});
     return authBoot;
   }
   async function authorization(forWallet = false) {
     await ready;
     if (!active() && !forWallet) return '';
-    const client = await initializeAuth();
-    const {data,error} = await client.auth.getSession();
-    if (error) throw error;
-    return data.session?.access_token ? 'Bearer ' + data.session.access_token : '';
+    const current=await walletSession();
+    return current?.access_token ? 'Bearer ' + current.access_token : '';
   }
   async function request(path, options = {}) {
     const token = await authorization(true);
@@ -93,10 +95,47 @@
   }
   function updateBalanceLabels() {
     const label=balance===null?'Your credits':`${balance} credit${balance===1?'':'s'}`;
-    document.querySelectorAll('[data-credit-balance],#cwHeaderButton').forEach(el=>el.textContent=label);
+    document.querySelectorAll('[data-credit-balance]').forEach(el=>{
+      el.textContent=balance===null&&balanceLoading?'Credits loading…':balance===null&&balanceFailed?'Credits unavailable':label;
+      el.classList.toggle('cw-balance-loading',balance===null&&balanceLoading);
+      el.setAttribute('aria-busy',String(balance===null&&balanceLoading));
+    });
+    const header=$('#cwHeaderButton');if(header)header.textContent=label;
     document.querySelectorAll('.cw-wallet-suffix').forEach(el=>el.hidden=balance===null);
     const note=$('#ihRequestForm .ih-form-footer small');
     if(note)note.textContent='1 credit covers this item check. A completed check uses a credit even if no match is found.';
+  }
+  function adoptSession(current) {
+    const owner=current?.user?.id||null;
+    if(owner!==activeOwner){
+      activeOwner=owner;walletGeneration++;refreshNumber++;walletFlight=null;
+      balance=null;balanceLoading=false;balanceFailed=false;updateBalanceLabels();
+    }
+  }
+  async function walletSession() {
+    const client=await initializeAuth();
+    for(let attempt=0;attempt<2;attempt++){
+      const generation=walletGeneration;
+      const {data,error}=await client.auth.getSession();if(error)throw error;
+      if(generation!==walletGeneration&&(data.session?.user?.id||null)!==activeOwner)continue;
+      adoptSession(data.session);return data.session;
+    }
+    throw Error('Your sign-in changed. Please try again.');
+  }
+  function warmBalance() {
+    if(!balanceWarm)balanceWarm=(async()=>{
+      if(balance===null){balanceLoading=true;balanceFailed=false;updateBalanceLabels();}
+      // Start the SDK/session restore while the independent catalog is in flight.
+      await Promise.all([ready,initializeAuth()]);
+      if(config.error)throw Error(config.error);
+      if(!active()){balanceLoading=false;updateBalanceLabels();return;}
+      const current=await walletSession();
+      if(current?.access_token)await refreshWallet();
+      else{balanceLoading=false;updateBalanceLabels();}
+    })().catch(()=>{
+      if(balance===null&&!walletFlight){balanceLoading=false;balanceFailed=true;updateBalanceLabels();}
+    }).finally(()=>{balanceWarm=null;});
+    return balanceWarm;
   }
   function dialog() {
     let el=$('#creditWalletDialog');
@@ -116,7 +155,7 @@
   async function renderWallet() {
     const el=$('#cwDialogContent'); if(!el)return;
     const client=await initializeAuth();
-    const {data}=await client.auth.getSession();
+    const data={session:await walletSession()};
     const signed=!!data.session;
     el.innerHTML=`<p class="lx-eyebrow">Your LockX credits</p><h2 id="cwWalletTitle">${signed?'A little proof, on hand.':'Your email. Your credits.'}</h2>
       ${signed?`<div class="cw-balance"><strong>${balance===null?'…':balance}</strong><span>available credits</span></div><div class="cw-account"><span>${esc(data.session.user.email)}</span><button type="button" class="cw-text-button" id="cwSignOut">Sign out</button></div>`:
@@ -142,7 +181,7 @@
     });
     $('#cwSignOut')?.addEventListener('click',async()=>{
       const {error}=await client.auth.signOut();if(error){message(error.message,true);return;}
-      balance=null;waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);clearInterval(polling);await renderWallet();updateBalanceLabels();
+      adoptSession(null);waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);clearInterval(polling);await renderWallet();updateBalanceLabels();
     });
     $('#cwPayPal').onclick=buyPayPal;
     if(signed&&config.apple_pay_ready)setupApplePay();
@@ -157,10 +196,25 @@
     if(el&&p)el.textContent=`${p.credits} verification credits · ${price(p.amount_cents)} USD`;
     document.querySelectorAll('[data-pick-pack]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.pickPack===selected)));
   }
-  async function refreshWallet() {
+  async function refreshWallet({force=false}={}) {
+    await ready;
+    const current=await walletSession();
+    if(!current?.access_token){balanceLoading=false;updateBalanceLabels();return;}
+    if(!activeOwner)throw Error('Sign in again to refresh your credits.');
+    const owner=activeOwner,generation=walletGeneration;
+    if(!force&&walletFlight?.owner===owner&&walletFlight.generation===generation)return walletFlight.promise;
     const number=++refreshNumber;
-    try{
-      const wallet=await request('/wallet');if(number!==refreshNumber)return;
+    if(balance===null)balanceLoading=true;
+    balanceFailed=false;updateBalanceLabels();
+    const flight={owner,generation,promise:null};
+    const isCurrent=()=>owner===activeOwner&&generation===walletGeneration&&number===refreshNumber;
+    flight.promise=(async()=>{try{
+      const response=await fetch(base+'/wallet',{cache:'no-store',headers:{Authorization:'Bearer '+current.access_token}});
+      const wallet=await response.json().catch(()=>({}));
+      if(!response.ok)throw Error(typeof wallet.detail==='string'?wallet.detail:'Your credits could not refresh. Please try again.');
+      if(!isCurrent())return;
+      if(!Number.isSafeInteger(wallet.balance)||wallet.balance<0)throw Error('Your credits could not refresh. Please try again.');
+      balanceLoading=false;balanceFailed=false;
       balance=wallet.balance;updateBalanceLabels();
       const count=$('.cw-balance strong');if(count)count.textContent=balance;
       const labels={purchase:'Credits purchased',verification:'Item verification',technical_refund:'Credit restored — technical issue',payment_refund:'Payment refunded'};
@@ -168,7 +222,14 @@
       if(history)history.innerHTML=wallet.history.length?wallet.history.map(row=>`<div><span>${esc(labels[row.kind]||'Credit adjustment')}<small>${new Date(row.created*1000).toLocaleDateString()}</small></span><strong>${row.delta>0?'+':''}${row.delta}</strong></div>`).join(''):'Your credit purchases and verifications will appear here.';
       if(wallet.credit_debt)message('A refunded payment included credits already used. Your next purchase first covers that balance.',true);
       return wallet;
-    }catch(error){if($('#creditWalletDialog')?.open)message(error.message,true);throw error;}
+    }catch(error){
+      if(isCurrent()){
+        balanceLoading=false;balanceFailed=true;updateBalanceLabels();
+        if($('#creditWalletDialog')?.open)message(error.message,true);
+      }
+      throw error;
+    }finally{if(walletFlight===flight)walletFlight=null;}})();
+    walletFlight=flight;return flight.promise;
   }
   async function open(packId) {
     warmPaymentOptions();
@@ -203,7 +264,7 @@
       try{
         const checkout=await request('/checkouts/'+encodeURIComponent(checkoutId));
         if(checkout.status==='paid'){
-          clearInterval(polling);waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);await refreshWallet();message(`${checkout.credits} credits added. You’re ready to verify.`);
+          clearInterval(polling);waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);await refreshWallet({force:true});message(`${checkout.credits} credits added. You’re ready to verify.`);
           const el=$('#cwMessage');if(el&&!$('#cwStartVerification'))el.insertAdjacentHTML('afterend','<a class="cw-button cw-verify-link" id="cwStartVerification" href="#in-hand">Start a verification →</a>');
           $('#cwStartVerification')?.addEventListener('click',()=>dialog().close());
           if(isReturn){const clean=new URL(location.href);['wallet','checkout','tx','st','amt','cc'].forEach(k=>clean.searchParams.delete(k));history.replaceState(null,'',clean.pathname+clean.search+clean.hash);}
@@ -330,7 +391,7 @@
             captured=true;
             if(!cancelled)complete(ApplePaySession.STATUS_SUCCESS);else finish();
             waitingCheckout=null;save(pendingKey,null);save(attemptKey,null);
-            await refreshWallet();message(`${checkout.credits} credits added. You’re ready to verify.`);
+            await refreshWallet({force:true});message(`${checkout.credits} credits added. You’re ready to verify.`);
           }catch(error){
             if(appleSession===session){if(!cancelled)complete(ApplePaySession.STATUS_FAILURE);else finish();}
             if(cancelled&&!captureStarted)return;
@@ -364,13 +425,13 @@
           if(!googlePurchase)throw Error('Please reopen Google Pay to confirm this purchase.');
           const checkout=await post('/checkouts',{pack_id:googlePurchase.packId,provider:'google_pay',request_key:googlePurchase.key});
           if(checkout.status==='paid'){
-            save(attemptKey,null);await refreshWallet();return {transactionState:'SUCCESS'};
+            save(attemptKey,null);await refreshWallet({force:true});return {transactionState:'SUCCESS'};
           }
           const confirmation=await paypalGoogle.confirmOrder({orderId:checkout.paypal_order_id,paymentMethodData:data.paymentMethodData});
           if(confirmation.status==='PAYER_ACTION_REQUIRED')await paypalGoogle.initiatePayerAction({orderId:checkout.paypal_order_id});
           else if(confirmation.status!=='APPROVED')throw Error('Payment has not been approved.');
           await post('/checkouts/'+checkout.id+'/capture',{order_id:checkout.paypal_order_id});
-          save(attemptKey,null);await refreshWallet();message(`${checkout.credits} credits added. You’re ready to verify.`);
+          save(attemptKey,null);await refreshWallet({force:true});message(`${checkout.credits} credits added. You’re ready to verify.`);
           return {transactionState:'SUCCESS'};
         }catch(error){return {transactionState:'ERROR',error:{intent:'PAYMENT_AUTHORIZATION',message:error.message}};}
       }}});
@@ -394,7 +455,7 @@
     if(config.error)throw Error(config.error);
     if(!config.credits_required)return;
     if(!await authorization()){await open();throw Error('Open the email sign-in link, then continue your verification.');}
-    await refreshWallet();
+    await refreshWallet({force:true});
     if(balance<1){await open();throw Error('Buy a credit pack, then continue your verification.');}
   }
   document.addEventListener('click',event=>{
@@ -415,10 +476,15 @@
   window.addEventListener('lockx-session',()=>setTimeout(async()=>{
     if(!active())return;
     try{
-      if(!await authorization()){balance=null;updateBalanceLabels();return;}
+      const current=await walletSession();
+      if(!current?.access_token){balanceLoading=false;updateBalanceLabels();return;}
       if($('#creditWalletDialog')?.open)await renderWallet();else await refreshWallet();
     }catch{}
   },0));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&waitingCheckout&&$('#creditWalletDialog')?.open)watchCheckout(waitingCheckout);});
   window.LockXCredits={ready,authorization,ensureForVerification,refresh:refreshWallet,open,decorate};
+  // A stored entry is only a reason to restore the SDK session, never authentication.
+  let returningSession=false;
+  try{returningSession=!!localStorage.getItem('sb-'+new URL(SUPABASE_URL).hostname.split('.')[0]+'-auth-token');}catch{}
+  if(returningSession||location.hash==='#in-hand'||isReturn)warmBalance();
 })();

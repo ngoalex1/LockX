@@ -36,7 +36,7 @@ async function harness(options={}) {
   }
   const document={querySelector:s=>nodes.get(s)||null,querySelectorAll:()=>[],createElement:tag=>new Element(tag),addEventListener:(type,fn)=>{listeners[type]=fn;},head:{append(script){scripts.push(script);if(!options.manualScripts)queueMicrotask(()=>script.onload());}}};
   const storage=new Map();
-  const window={ApplePaySession:Session,paypal:options.manualScripts?undefined:{Applepay:()=>applepay,Googlepay:()=>({})},addEventListener(){},ensureLockXAuthClient:async()=>{authCalls++;if(options.authPending)await options.authPending;return {auth:{getSession:async()=>({data:{session:{access_token:'test-token',user:{email:'test@example.com'}}}})}};}};
+  const window={ApplePaySession:Session,paypal:options.manualScripts?undefined:{Applepay:()=>applepay,Googlepay:()=>({})},addEventListener(){},ensureLockXAuthClient:async()=>{authCalls++;if(options.authPending)await options.authPending;return {auth:{getSession:async()=>({data:{session:{access_token:'test-token',user:{id:'test-owner',email:'test@example.com'}}}})}};}};
   const fetch=async (url,init={})=>{
     if(url.endsWith('/catalog'))return response(config);
     const body=init.body?JSON.parse(init.body):undefined;requests.push({url,body});
