@@ -86,7 +86,7 @@
     const form=$('#ihRequestForm');
     if (form&&!$('#ihCreditStatus')) {
       const bar=document.createElement('div');bar.id='ihCreditStatus';bar.className='cw-inline-wallet';
-      bar.innerHTML='<div><strong data-credit-balance>Your credits</strong><small>1 credit per item verification</small></div><button type="button" class="cw-text-button" data-credit-wallet>Buy credits / sign in</button>';
+      bar.innerHTML='<div><strong data-credit-balance>Your credits</strong><span class="cw-wallet-suffix" hidden> in wallet</span><small>1 credit per item verification</small></div><button type="button" class="cw-text-button" data-credit-wallet>Buy credits / sign in</button>';
       form.prepend(bar);
     }
     updateBalanceLabels();
@@ -94,6 +94,7 @@
   function updateBalanceLabels() {
     const label=balance===null?'Your credits':`${balance} credit${balance===1?'':'s'}`;
     document.querySelectorAll('[data-credit-balance],#cwHeaderButton').forEach(el=>el.textContent=label);
+    document.querySelectorAll('.cw-wallet-suffix').forEach(el=>el.hidden=balance===null);
     const note=$('#ihRequestForm .ih-form-footer small');
     if(note)note.textContent='1 credit covers this item check. A completed check uses a credit even if no match is found.';
   }
