@@ -27,3 +27,11 @@ Use the campaign-link builder to label each platform, campaign and post. Share t
 Tracking begins with this release and does not reconstruct historical traffic. First-party, 24-hour browser-session visits link to checkout and verification records. Campaign panels group outcomes by the visit's UTC start date, including later linked outcomes through the report snapshot. Purchase conversion counts distinct paying visits divided by tracked visits. Actual payments and verification outcomes come from server records.
 
 Different devices, blocked tracking, removed link labels and lost browser sessions can leave activity unattributed. Reach, impressions, likes, ad spend and platform ROAS are not supplied by this system. Attribution stores bounded campaign labels, opaque visit IDs and timestamps; it does not store full URLs, IP addresses, email addresses or browser fingerprints in marketing tables. Global Privacy Control and Do Not Track signals disable browser tracking. Analytics is asynchronous; an unavailable attribution service does not prevent a purchase.
+
+## Verification queue
+
+The queue panel shows saved submissions, automatic retries, capacity waits, worker heartbeats and recent completion/failure counts. It excludes private evidence and customer contact details. Queue position is advisory; a waiting-time estimate is omitted until reliable timing history exists.
+
+The approved AI processing allowance is $100 over the rolling last 60 minutes. **Used or reserved** includes recorded provider cost plus provisional allowances for in-flight or unknown outcomes; recorded cost is already part of that total. It is a ceiling, not a fixed charge. Hosting, storage and payment fees are separate. Processing pauses safely when admission headroom is exhausted.
+
+See [QUEUE.md](QUEUE.md) for deployment, evidence preservation, technical retry and worker recovery details. This initial single-volume release does not establish 10,000-verification/hour capacity.

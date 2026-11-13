@@ -199,4 +199,9 @@ def create_router(authenticate_identity):
         from credit_social import analytics as social_analytics
         return JSONResponse(social_analytics(days), headers=PRIVATE_HEADERS)
 
+    @router.get("/queue")
+    def queue(admin_id=Depends(admin)):
+        from verification_queue import admin_status
+        return JSONResponse(admin_status(), headers=PRIVATE_HEADERS)
+
     return router

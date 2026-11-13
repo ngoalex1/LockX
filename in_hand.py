@@ -34,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from PIL import Image, ImageDraw, ImageFont
 from lost_found import MAX_IMAGE, clean_photo, limited
 import credit_wallet as credits
+import verification_queue as verification_queue
 
 log = logging.getLogger("lockx.in_hand")
 MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 6, 60 * 1024 * 1024, 4
@@ -289,6 +290,7 @@ def event(db, request_id, name):
 
 
 def store_media(db, request_id, role, mime, content, seconds=None, label=""):
+    verification_queue.check_storage(db,len(content))
     media_id = str(uuid4())
     db.execute("INSERT INTO ih_media VALUES (?,?,?,?,?,?,?,?)", (media_id, request_id, role, mime, content, hashlib.sha256(content).hexdigest(), seconds, label))
     return media_id
@@ -421,6 +423,8 @@ def view(db, row, private=False):
     result = {"id": row["id"], **{k:v for k,v in listing.items() if k != "consent" and (k != "auto_publish" or v is True)},
               "status": status(row), "created": row["created"], "expires": row["expires"],
               "submitted": row["submitted"], "media": media if private else [m for m in media if m["role"] == "listing"]}
+    if queue := verification_queue.public_status(db,row["id"]):
+        result["queue"] = queue
     retry = db.execute("SELECT reason FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()
     if retry:
         result["capture_retry_reason"] = retry["reason"]
@@ -500,6 +504,8 @@ def scan_stage_view(session, meta):
 
 
 def prepare_scan(request_id):
+    if verification_queue.enabled():
+        return  # Queued captures use one final comparison, not optional advisory calls.
     """One listing-level grouping pass; the capture can always start with the safe fallback."""
     if not visual_ready():
         return
@@ -540,10 +546,11 @@ def cleanup_scan_media(db, now):
     db.execute("DELETE FROM ih_scan_chunks WHERE session_id IN ("+abandoned+")", (now,now-900))
     db.execute("DELETE FROM ih_scan_previews WHERE session_id IN ("+abandoned+")", (now,now-900))
     # Recover an interrupted in-process decoder rather than leave a seller waiting forever.
+    queued_guard = "AND NOT EXISTS (SELECT 1 FROM verification_jobs j WHERE j.request_id=r.id)" if db.execute("SELECT 1 FROM sqlite_master WHERE name='verification_jobs'").fetchone() else ""
     interrupted = db.execute("""SELECT r.id,r.analysis,r.session_id FROM ih_requests r
         JOIN ih_scan_sessions a ON a.session_id=r.session_id
         WHERE r.status='processing' AND r.analysis_status IN ('decoding','pending','processing')
-        AND r.submitted<?""", (now-600,)).fetchall()
+        AND r.submitted<? """ + queued_guard, (now-600,)).fetchall()
     for row in interrupted:
         analysis = json.loads(row["analysis"] or "{}")
         analysis.update(result="inconclusive",summary="The recording was received, but processing was interrupted. Please make a fresh inspection.")
@@ -556,6 +563,8 @@ def cleanup_scan_media(db, now):
 
 def review_scan(session_id):
     """One asynchronous advisory check; preview frames can never authorize a marking."""
+    if verification_queue.enabled():
+        return
     try:
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -651,17 +660,27 @@ def strict_vision_schema(schema, allowed_frame_indices=None, photo_count=None):
 
 def vision_call(schema, instructions, content, timeout=100, allowed_frame_indices=None, photo_count=None):
     key, model = os.getenv("OPENAI_API_KEY"), vision_model()
+    output_schema = strict_vision_schema(schema,allowed_frame_indices,photo_count)
+    call_id = verification_queue.reserve_call(model,instructions,content,output_schema) if verification_queue.enabled() else None
     response = httpx.post("https://api.openai.com/v1/responses", headers={"Authorization":"Bearer " + key},
         json={"model":model,"store":False,"instructions":instructions,"input":[{"role":"user","content":content}],
-              "text":{"format":{"type":"json_schema","name":"in_hand_assessment","strict":True,"schema":strict_vision_schema(schema,allowed_frame_indices,photo_count)}},
+              "text":{"format":{"type":"json_schema","name":"in_hand_assessment","strict":True,"schema":output_schema}},
               "max_output_tokens":5000}, timeout=timeout)
-    response.raise_for_status()
-    output = "".join(c.get("text", "") for item in response.json().get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if call_id:
+            verification_queue.note_provider_failure(exc)
+        raise
+    payload = response.json()
+    if call_id:
+        verification_queue.record_usage(call_id,payload.get("usage"))
+    output = "".join(c.get("text", "") for item in payload.get("output", []) for c in item.get("content", []) if c.get("type") == "output_text")
     return schema.model_validate_json(output)
 
 
 def vision_model():
-    return os.getenv("LOCKX_IN_HAND_VISION_MODEL") or os.getenv("LOCKX_VISION_MODEL")
+    return verification_queue.worker_model() or os.getenv("LOCKX_IN_HAND_VISION_MODEL") or os.getenv("LOCKX_VISION_MODEL")
 
 
 def visual_ready():
@@ -730,7 +749,7 @@ def capture_quality_diagnostics(frames, checks):
 
 def check_reference_view(token, data, content, quality):
     """An advisory follow-up prompt. Final approval always uses the uploaded video."""
-    if not visual_ready() or (quality["feedback"] and not data.continue_with_quality_issue):
+    if verification_queue.enabled() or not visual_ready() or (quality["feedback"] and not data.continue_with_quality_issue):
         return None
     with database() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -899,24 +918,28 @@ def examine_scan_video(content, session):
             cap.release()
 
 
-def finish_scan_background(request_id, session_id):
+def finish_scan_background(request_id, session_id, queue_claim=None):
     """Accept the upload quickly, then decode and compare without holding the seller screen."""
     try:
         with database() as db:
+            if queue_claim:
+                verification_queue.ensure_current(db,queue_claim)
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
             sess = db.execute("SELECT * FROM ih_sessions WHERE id=? AND request_id=?",(session_id,request_id)).fetchone()
             meta = db.execute("SELECT * FROM ih_scan_sessions WHERE session_id=?",(session_id,)).fetchone()
             video = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='video' ORDER BY rowid DESC LIMIT 1",(request_id,)).fetchone()
             if not row or row["session_id"] != session_id or row["analysis_status"] != "decoding":
                 return
-            if not sess or not meta or not video:
+            if not sess or (not meta and not queue_claim) or not video:
                 raise ValueError("Missing continuous scan data")
-            session_copy = {**dict(sess),"scan_min_seconds":meta["min_seconds"],"scan_max_seconds":meta["max_seconds"]}
+            session_copy = {**dict(sess),**({"scan_min_seconds":meta["min_seconds"],"scan_max_seconds":meta["max_seconds"]} if meta else {})}
         decoding_started = perf_counter()
         frames, checks = examine_video(video[0],session_copy)
         checks["decode_ms"] = round((perf_counter()-decoding_started)*1000, 2)
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
+            if queue_claim:
+                verification_queue.ensure_current(db,queue_claim)
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
             if row["session_id"] != session_id or row["analysis_status"] != "decoding":
                 return
@@ -928,8 +951,10 @@ def finish_scan_background(request_id, session_id):
             db.execute("DELETE FROM ih_scan_chunks WHERE session_id=?",(session_id,))
             db.execute("DELETE FROM ih_scan_previews WHERE session_id=?",(session_id,))
             event(db,request_id,"Continuous scan decoded and evidence extracted from the complete recording")
-        analyze(request_id)
+        analyze(request_id,queue_claim=queue_claim) if queue_claim else analyze(request_id)
     except Exception:
+        if queue_claim:
+            raise
         log.exception("Continuous scan processing failed for %s",request_id)
         with database() as db:
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
@@ -1136,10 +1161,13 @@ def recommendation(visual, photo_count, checks):
     return "inconclusive"
 
 
-def analyze(request_id):
+def analyze(request_id, queue_claim=None):
     analysis_started = perf_counter()
     preparation = None
     with database() as db:
+        if queue_claim:
+            db.execute("BEGIN IMMEDIATE")
+            verification_queue.ensure_current(db,queue_claim)
         changed = db.execute("UPDATE ih_requests SET analysis_status='processing' WHERE id=? AND analysis_status='pending'", (request_id,)).rowcount
         row = db.execute("SELECT * FROM ih_requests WHERE id=?", (request_id,)).fetchone()
         media = db.execute("SELECT * FROM ih_media WHERE request_id=? ORDER BY rowid", (request_id,)).fetchall()
@@ -1151,6 +1179,8 @@ def analyze(request_id):
     if isinstance(analysis.get("video"), dict):
         analysis["video"].pop("vision_ms", None)
     if not visual_ready():
+        if queue_claim:
+            raise ValueError("Verification provider is not configured")
         analysis.update(summary="Your recording is ready to review. Automated photo comparison is unavailable; an individual-item match has not been established.", result="inconclusive")
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='unavailable',analysis=? WHERE id=?", (json.dumps(analysis), request_id))
@@ -1162,6 +1192,9 @@ def analyze(request_id):
         if not refs or not frames:
             raise ValueError("Missing extracted comparison evidence")
         selected, selection = select_evidence_frames(refs, frames)
+        evidence_fingerprint = [(m["id"],m["role"],hashlib.sha256(m["content"]).hexdigest()) for m in media if m["role"] in {"listing","video","frame"}]
+        if queue_claim and any(hashlib.sha256(m["content"]).hexdigest()!=m["sha256"] for m in media if m["role"] in {"listing","video","frame"}):
+            raise ValueError("Saved evidence hash mismatch")
         analysis["video"]["frame_selection"] = selection
         # The future QR images are memory-only. No public ID is reachable until
         # complete-video verification and a second transactional check succeed.
@@ -1231,6 +1264,12 @@ def analyze(request_id):
         analysis.update(visual=visual.model_dump(), result=result, summary=summary)
         analysis["video"]["analysis_ms"] = round((perf_counter()-analysis_started)*1000,2)
         with database() as db:
+            if queue_claim:
+                db.execute("BEGIN IMMEDIATE")
+                verification_queue.ensure_current(db,queue_claim)
+                current_fingerprint = [(m["id"],m["role"],hashlib.sha256(m["content"]).hexdigest()) for m in db.execute("SELECT * FROM ih_media WHERE request_id=? AND role IN ('listing','video','frame') ORDER BY rowid",(request_id,))]
+                if current_fingerprint != evidence_fingerprint:
+                    raise ValueError("Saved comparison evidence changed")
             db.execute("UPDATE ih_requests SET status=?,analysis_status='complete',analysis=? WHERE id=?", (result,json.dumps(analysis),request_id))
             credits.settle_check(db,request_id)
             event(db, request_id, "Selected photos and written claims compared with server-extracted video frames")
@@ -1239,6 +1278,10 @@ def analyze(request_id):
             if automatic_publication_allowed(listing,eligibility):
                 db.execute("INSERT OR IGNORE INTO ih_publication_jobs VALUES (?,'pending',0,?)", (request_id,time.time()))
     except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
+        if queue_claim:
+            if preparation is not None:
+                preparation.close()
+            raise
         log.warning("Visual comparison failed for %s", request_id)
         # Diagnostics remain in the capability-protected management response;
         # never persist a provider body, user images, keys or raw model output.
@@ -1261,7 +1304,7 @@ def analyze(request_id):
     # Rendering a QR export must never turn a valid AI comparison into a failed
     # comparison. Publication has its own bounded, separately committed outcome.
     try:
-        auto_publish_confirmed(request_id,preparation)
+        auto_publish_confirmed(request_id,preparation,queue_claim=queue_claim) if queue_claim else auto_publish_confirmed(request_id,preparation)
     finally:
         if preparation is not None:
             preparation.close()
@@ -1549,11 +1592,13 @@ def render_publication(snapshot, preparation=None):
         wait(list(futures.values()))
 
 
-def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False):
+def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False, queue_claim=None):
     """Render privately, then atomically commit an unchanged approved cohort."""
     started = perf_counter()
     if db.in_transaction:
         raise RuntimeError("Photo rendering must start outside a write transaction")
+    if queue_claim:
+        verification_queue.ensure_current(db,queue_claim)
     row = db.execute("SELECT * FROM ih_requests WHERE id=?",(row["id"],)).fetchone()
     snapshot = publication_snapshot(db,row)
     prior = existing_publication(db,row,snapshot["eligibility"])
@@ -1564,6 +1609,8 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False):
     render_ms = round((perf_counter()-render_started)*1000,2)
     write_started = perf_counter()
     db.execute("BEGIN IMMEDIATE")
+    if queue_claim:
+        verification_queue.ensure_current(db,queue_claim)
     row = db.execute("SELECT * FROM ih_requests WHERE id=?",(snapshot["request_id"],)).fetchone()
     current = publication_snapshot(db,row)
     prior = existing_publication(db,row,current["eligibility"])
@@ -1593,11 +1640,13 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False):
     return publication_id
 
 
-def auto_publish_confirmed(request_id, preparation=None):
+def auto_publish_confirmed(request_id, preparation=None, queue_claim=None):
     """At most two rendering attempts, without repeating the AI comparison."""
     for attempt_index in range(2):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
+            if queue_claim:
+                verification_queue.ensure_current(db,queue_claim)
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
             if not row or not automatic_publication_allowed(json.loads(row["listing"]),photo_eligibility(db,row)):
                 return
@@ -1606,25 +1655,33 @@ def auto_publish_confirmed(request_id, preparation=None):
                 # An owner's withdrawal is permanent for this inspection.
                 return
             job = db.execute("SELECT * FROM ih_publication_jobs WHERE request_id=?",(request_id,)).fetchone()
-            if job and (job["attempts"] >= 2 or (job["state"] == "processing" and job["updated"] > time.time()-120)):
+            resume_fenced = bool(queue_claim and job and job["state"] == "processing")
+            if job and not resume_fenced and (job["attempts"] >= 2 or (job["state"] == "processing" and job["updated"] > time.time()-120)):
                 return
-            attempts = (job["attempts"] if job else 0) + 1
+            # A replacement durable owner may resume the interrupted render;
+            # fencing prevents the previous owner from committing its output.
+            attempts = job["attempts"] if resume_fenced else (job["attempts"] if job else 0) + 1
             db.execute("INSERT INTO ih_publication_jobs VALUES (?,'processing',?,?) ON CONFLICT(request_id) DO UPDATE SET state='processing',attempts=excluded.attempts,updated=excluded.updated",(request_id,attempts,time.time()))
         try:
             with database() as db:
                 row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
-                publish_confirmed_photos(db,row,preparation if attempt_index == 0 else None,require_auto=True)
+                publish_confirmed_photos(db,row,preparation if attempt_index == 0 else None,require_auto=True,queue_claim=queue_claim)
                 db.execute("UPDATE ih_publication_jobs SET state='ready',updated=? WHERE request_id=?",(time.time(),request_id))
             return
         except Exception:
             # An incomplete render rolls back atomically with its mappings.
             log.warning("Approved photo marking failed for %s",request_id)
             with database() as db:
+                db.execute("BEGIN IMMEDIATE")
+                if queue_claim:
+                    verification_queue.ensure_current(db,queue_claim)
                 db.execute("UPDATE ih_publication_jobs SET state=?,updated=? WHERE request_id=? AND attempts=?",("pending" if attempts < 2 else "failed",time.time(),request_id,attempts))
 
 
 def schedule_publication(db, row, background):
     """Recover opted-in completed records without putting rendering on a GET."""
+    if verification_queue.has_job(db,row["id"]):
+        return  # The leased durable worker owns automatic publication recovery.
     if (automatic_publication_allowed(json.loads(row["listing"]),photo_eligibility(db,row))
             and not db.execute("SELECT 1 FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()):
         job = db.execute("SELECT state,attempts,updated FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
@@ -1723,6 +1780,7 @@ def seller_result_payload(db, row):
     pending = current_status in {"waiting","capturing","processing"}
     fallback = "Awaiting comparison with the camera recording." if pending else "A match has not been established for this photo."
     return {"id":row["id"],"status":current_status,"analysis_status":row["analysis_status"],
+            **({"queue":queue} if (queue:=verification_queue.public_status(db,row["id"])) else {}),
             "summary":str(analysis.get("summary") or ("Complete the camera scan to compare these photos." if pending else "An item match has not been established.")),
             "result":analysis.get("result") if analysis.get("result") in {"confirmed","mismatch","inconclusive"} else "inconclusive",
             "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
@@ -1740,15 +1798,17 @@ def seller_event_state(token, previous=None):
         available(row)
         publication = db.execute("SELECT id,created,revoked FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
         job = db.execute("SELECT state,attempts,updated FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
+        queue = verification_queue.public_status(db,row["id"])
         mappings = [tuple(m) for m in db.execute("SELECT p.photo_index,p.media_id,m.sha256 FROM ih_publication_photos p JOIN ih_publications v ON v.id=p.publication_id JOIN ih_media m ON m.id=p.media_id WHERE v.request_id=? ORDER BY p.photo_index",(row["id"],))]
         revision = hashlib.sha256(json.dumps([status(row),row["analysis_status"],row["analysis"],row["listing"],
             row["session_id"],dict(publication) if publication else None,dict(job) if job else None,mappings,
-            session_location(db,row)],sort_keys=True).encode()).hexdigest()
+            session_location(db,row),queue],sort_keys=True).encode()).hexdigest()
         if previous and previous["revision"] == revision:
             return previous
         result = seller_result_payload(db,row)
         return {"status":result["status"],"analysis_status":result["analysis_status"],
-                "publication_status":result.get("publication_status"),"revision":revision}
+                "publication_status":result.get("publication_status"),"revision":revision,
+                **({"queue":queue} if queue else {})}
 
 
 def admit_result_stream(request_id):
@@ -1920,6 +1980,9 @@ def create_router(authenticate):
 
     @router.post("/requests", status_code=201)
     async def create(request: Request, background: BackgroundTasks, owner=Depends(creator)):
+        if verification_queue.enabled():
+            with database() as db:
+                verification_queue.check_capacity(db)
         limited("in-hand-create:" + owner, 30)
         limited("in-hand-create-address:" + (request.client.host if request.client else "unknown"),60)
         async with request.form(max_files=MAX_PHOTOS,max_fields=1,max_part_size=MAX_IMAGE) as form:
@@ -2065,6 +2128,7 @@ def create_router(authenticate):
     def scan_start(token: str):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
+            verification_queue.check_capacity(db)
             now = time.time()
             cleanup_scan_media(db,now)
             row = seller(db,token)
@@ -2095,6 +2159,7 @@ def create_router(authenticate):
         """One fixed recording; every photo is compared after the camera stops."""
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
+            verification_queue.check_capacity(db)
             now = time.time()
             cleanup_scan_media(db,now)
             row = seller(db,token)
@@ -2278,6 +2343,7 @@ def create_router(authenticate):
                 total = db.execute("SELECT COALESCE(SUM(length(content)),0) FROM ih_scan_chunks WHERE session_id=?",(session_id,)).fetchone()[0]
                 if total+len(content) > MAX_VIDEO:
                     raise HTTPException(413,"Keep the camera recording under 60 MB")
+                verification_queue.check_storage(db,len(content))
                 db.execute("INSERT INTO ih_scan_chunks VALUES (?,?,?,?,?)",(session_id,sequence,content,digest,time.time()))
             received = db.execute("SELECT COUNT(*),SUM(length(content)) FROM ih_scan_chunks WHERE session_id=?",(session_id,)).fetchone()
         return {"sequence":sequence,"sha256":digest,"received":received[0],"received_bytes":received[1]}
@@ -2342,14 +2408,18 @@ def create_router(authenticate):
             db.execute("UPDATE ih_requests SET status='processing',submitted=?,analysis_status='decoding',analysis=? WHERE id=?",(time.time(),json.dumps(analysis),row["id"]))
             db.execute("UPDATE ih_scan_sessions SET upload_status='processing',chunk_count=? WHERE session_id=?",(data.chunk_count,data.session_id))
             event(db,row["id"],"Continuous camera recording received in ordered pieces")
+            if verification_queue.enabled():
+                verification_queue.enqueue(db,row["id"])
             result = view(db,seller(db,token))
-        background.add_task(finish_scan_background,row["id"],data.session_id)
+        if not verification_queue.enabled():
+            background.add_task(finish_scan_background,row["id"],data.session_id)
         return result
 
     @router.post("/seller/{token}/start")
     def start(token: str):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
+            verification_queue.check_capacity(db)
             row = seller(db,token)
             available(row)
             if row["status"] not in {"waiting","capturing"}:
@@ -2437,7 +2507,7 @@ def create_router(authenticate):
                 session_copy.update(scan_min_seconds=scan_meta["min_seconds"],scan_max_seconds=scan_meta["max_seconds"])
         # Decoding does not block other browser requests while the video is processed.
         from starlette.concurrency import run_in_threadpool
-        frames,checks = await run_in_threadpool(examine_video,content,session_copy)
+        frames,checks = ([],{}) if verification_queue.enabled() else await run_in_threadpool(examine_video,content,session_copy)
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
@@ -2458,8 +2528,11 @@ def create_router(authenticate):
                 db.execute("DELETE FROM ih_scan_chunks WHERE session_id=?",(capture.session_id,))
                 db.execute("DELETE FROM ih_scan_previews WHERE session_id=?",(capture.session_id,))
             event(db,row["id"],"Continuous recording received and evidence frames extracted")
+            if verification_queue.enabled():
+                verification_queue.enqueue(db,row["id"])
             result = view(db,seller(db,token))
-        background.add_task(analyze,row["id"])
+        if not verification_queue.enabled():
+            background.add_task(analyze,row["id"])
         return result
 
     @router.get("/seller/{token}/photos/{media_id}")
@@ -2493,8 +2566,10 @@ def create_router(authenticate):
             db.execute("BEGIN IMMEDIATE")
             credits.reserve_check(db,request_id)
             db.execute("UPDATE ih_requests SET status='processing',analysis_status='pending' WHERE id=?",(request_id,))
-        background.add_task(analyze,request_id)
-        return {"status":"processing"}
+            queue = verification_queue.enqueue(db,request_id,technical_retry=True) if verification_queue.enabled() else None
+        if not verification_queue.enabled():
+            background.add_task(analyze,request_id)
+        return {"status":"processing",**({"queue":queue} if queue else {})}
 
     @router.get("/requests/{request_id}/evidence")
     def evidence(request_id: str, owner=Depends(access)):
