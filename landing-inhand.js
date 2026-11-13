@@ -56,23 +56,25 @@
 
   const markup = `
     <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
-      <div class="lx-hero lx-wrap lx-rose-hero">
-        <div class="lx-rose-header">
-          <div><p class="lx-eyebrow">Details make the difference.</p><h1 id="lxHeroTitle">Your photos.<br>Your item. <em>Confirmed.</em></h1></div>
-          <p class="lx-rose-intro">For the things you collect,<br>the stories you pass on,<br>and the details that matter.</p>
+      <div class="lx-hero lx-wrap lx-compact-hero">
+        <div class="lx-compact-intro">
+          <p class="lx-eyebrow">LockX in-hand verification</p>
+          <h1 id="lxHeroTitle"><span class="lx-compact-stat">45%</span><span class="lx-compact-headline">more buying<br>confidence.</span></h1>
+          <p class="lx-compact-price">For just 50¢.</p>
+          <p class="lx-compact-roi">The best ROI in sales.</p>
+          <p class="lx-compact-description">Match your listing photos to a fresh 10-second item video. Give buyers a verification record they can check.</p>
+          <div class="lx-compact-actions"><a class="lx-button" href="#in-hand">Verify your listing photos ${arrow}</a><p class="lx-compact-note">50¢ per item check · Credit packs from $5</p></div>
         </div>
-        <section class="lx-steps-fan" id="lxHowItWorks" aria-label="How LockX works in three steps">
+        <div class="lx-compact-art">${inHandCapture('compact-video')}</div>
+        <section class="lx-compact-steps" id="lxHowItWorks" aria-label="How LockX works in three steps">
           <ol>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">01</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-photos">${pokemonCard('front','fan-photo-front').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}${pokemonCard('back','fan-photo-back').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}</div></div><h3>Take photos</h3></li>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">02</span><div class="lx-fan-art">${inHandCapture('fan-video')}</div><h3>Confirm with video</h3></li>
-            <li class="lx-fan-card"><span class="lx-fan-number" aria-hidden="true">03</span><div class="lx-fan-art" aria-hidden="true"><div class="lx-fan-proof">${pokemonCard('front','fan-proof').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}<div class="lx-fan-seal"><span class="lx-fan-check">${check}</span>${qr()}</div></div></div><h3>Get verified</h3></li>
+            <li><span aria-hidden="true">01</span><div><h2>Take photos</h2><p>Add the photos you plan to list.</p></div></li>
+            <li><span aria-hidden="true">02</span><div><h2>Confirm with video</h2><p>Record the item in hand for 10 seconds.</p></div></li>
+            <li><span aria-hidden="true">03</span><div><h2>Get verified</h2><p>Share matched photos with a QR verification link.</p></div></li>
           </ol>
         </section>
-        <div class="lx-steps-cta"><a class="lx-button" href="#in-hand">Verify your photos ${arrow}</a><p class="lx-hero-note">No app. No account. Just your photos and camera.</p></div>
         <p class="lx-rose-scope">Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</p>
       </div>
-
-      <section class="lx-details-section" aria-labelledby="lxDetailsTitle"><div class="lx-wrap lx-detail-layout"><div class="lx-detail-title"><p class="lx-eyebrow">The difference is in the details.</p><h2 id="lxDetailsTitle">More than<br>a similar-looking item.</h2><p>LockX compares the features that connect your photos to the item in the video.</p></div><div class="lx-detail-list"><article><span>01</span><div><h3>Markings. Text. Numbers.</h3><p>Distinctive details, visible wear, and readable numbers help establish a match. A different serial number matters.</p></div></article><article><span>02</span><div><h3>A result for every photo.</h3><p>Each selected photo is checked. If a view is unclear or the evidence does not match, you see what needs attention.</p></div></article><article><span>03</span><div><h3>A QR code that tells the story.</h3><p>Approved images link back to their LockX verification record, so a buyer can check the photo set.</p></div></article></div></div></section>
 
       <section class="lx-faq lx-section lx-wrap" id="lxQuestions" aria-labelledby="lxFAQTitle"><div class="lx-section-heading"><h2 id="lxFAQTitle">A few good questions.</h2></div><div class="lx-faq-list"><details><summary>What does In-hand Verified confirm?<span aria-hidden="true">+</span></summary><p>It checks whether your selected photos match the physical item shown in a newly recorded video. It does not establish brand authenticity, legal ownership, condition beyond what is visible, or a guarantee of a transaction.</p></details><details><summary>Do I need an app or an account?<span aria-hidden="true">+</span></summary><p>No. Add your photos and open the camera link in your phone’s browser. Keep your private link so you can return to your result.</p></details><details><summary>How long does it take?<span aria-hidden="true">+</span></summary><p>The recording lasts 10 seconds and stops automatically. Upload and AI comparison follow; the total time depends on your connection, photos, and the evidence captured.</p></details><details><summary>How do I save the verified photos?<span aria-hidden="true">+</span></summary><p>Your approved images appear with QR codes even if another selected photo does not match. Only verified photos are included when saving. Tap the save button, then choose Save Images on iPhone or a supported save option on Android. Your phone asks you to confirm. Individual image saving is also available.</p></details></div></section>
 
