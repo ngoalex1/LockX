@@ -440,6 +440,12 @@ async def reveal_craigslist_contact(url):
     """Return {status, email}; statuses: revealed, unavailable, blocked, busy."""
     if not is_craigslist_listing_url(url):
         return _result('unavailable')
+    mode = os.getenv('LOCKX_CRAIGSLIST_CONTACT_MODE', 'local').strip().lower()
+    if mode == 'remote':
+        from craigslist_remote import reveal_remote_craigslist_contact
+        return await reveal_remote_craigslist_contact(url)
+    if mode != 'local':
+        return _result('unavailable')
     if not _slots.acquire(blocking=False):
         return _result('busy')
     state = {'closing': False}

@@ -2017,10 +2017,18 @@ def create_router(authenticate):
         return JSONResponse(result, headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
 
     @router.get("/requests/{request_id}/seller-email")
-    def seller_email_draft(request_id: str, owner=Depends(access)):
+    async def seller_email_draft(request_id: str, owner=Depends(access)):
         with database() as db:
             row=owned(db,request_id,owner)
-            return JSONResponse(seller_email.draft(db,row),headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+            before=dict(row)
+            draft=seller_email.draft(db,row)
+        import craigslist_draft_contact
+        found=await craigslist_draft_contact.lookup(before,draft)
+        if found:
+            with database() as db:
+                row=owned(db,request_id,owner)
+                draft=craigslist_draft_contact.apply(row,seller_email.draft(db,row),found)
+        return JSONResponse(draft,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
 
     @router.post("/requests/{request_id}/seller-email")
     async def send_seller_email(request_id: str, data: SellerEmailSend, request: Request):

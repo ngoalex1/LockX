@@ -1,0 +1,8 @@
+{
+  "name": "lockx-public-site",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {"node": ">=22.19.0"},
+  "dependencies": {"@vercel/sandbox": "4.0.0"},
+  "scripts": {"test:contact-sandbox": "node --test tests/test_contact_sandbox.cjs"}
+}

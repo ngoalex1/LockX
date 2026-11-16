@@ -588,6 +588,9 @@ app.include_router(recovery_router(current_user))
 
 app.include_router(in_hand_router(current_user))
 
+from craigslist_remote import router as craigslist_contact_router
+app.include_router(craigslist_contact_router)
+
 # Credit wallet uses the same verified Supabase identity as the private workspace.
 from credit_wallet import create_router as credit_router
 app.include_router(credit_router(current_user))
