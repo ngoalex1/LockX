@@ -62,7 +62,7 @@ def _contact(row):
     contact = source.get('seller_contact') or {}
     candidates = []
     for entry in contact.get('candidates',[])[:3]:
-        if not isinstance(entry,dict) or entry.get('source') not in {'listing_mailto','structured_seller'}:
+        if not isinstance(entry,dict) or entry.get('source') not in {'listing_mailto','structured_seller','craigslist_reply'}:
             continue
         try: email = normalized_email(entry.get('email',''))
         except (ValueError,TypeError,AttributeError): continue
@@ -118,6 +118,10 @@ def draft(db, row):
               'status':public_status,'recipient_locked':bool(existing),
               'send_ready':bool(configured() and pending and not expired and public_status not in {'accepted','sending'}
                                 and not (existing and existing['next_attempt']>time.time()))}
+    contact_source=(json.loads(row['listing']).get('listing_import') or {}).get('seller_contact') or {}
+    reveal_status=contact_source.get('reveal_status')
+    if reveal_status in {'revealed','unavailable','blocked','busy','not_needed'}:
+        result['contact_reveal_status']=reveal_status
     if existing and existing['next_attempt']>time.time():
         result['retry_after']=max(1,int(existing['next_attempt']-time.time()+.999))
     if existing:

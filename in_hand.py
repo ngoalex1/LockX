@@ -2008,7 +2008,7 @@ def create_router(authenticate):
                 "continuous_scan":True,"min_capture_seconds":SCAN_MIN_SECONDS,"max_capture_seconds":SCAN_MAX_SECONDS,
                 "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10,"credits_required":credits.enabled(),
                 "buyer_requests":True,"shared_evidence":True,"grounded_evidence_regions":True,"listing_photo_import":True,
-                "seller_email_drafts":True,"seller_email_sending":seller_email.configured()}
+                "seller_email_drafts":True,"seller_email_sending":seller_email.configured(),"craigslist_reply_reveal":True}
 
     @router.post("/listing-import")
     async def import_listing_photos(data: ListingImportInput, request: Request):

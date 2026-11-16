@@ -350,11 +350,35 @@ async def import_listing(url):
     title, photos = '', []
     canonical = original
     seller_contact = None
+    reveal_task = None
     try:
         async with asyncio.timeout(IMPORT_SECONDS):
             content, canonical, _ = await fetch_public(original, kind='html')
             title, candidates = parse_listing(content, canonical)
             seller_contact = extract_seller_contact(content, canonical)
+            from craigslist_contact import is_craigslist_listing_url, reveal_craigslist_contact
+            if is_craigslist_listing_url(canonical):
+                seller_contact['contact_url']=seller_contact.get('contact_url') or canonical
+                seller_contact['reveal_status']='not_needed' if seller_contact['candidates'] else 'unavailable'
+                if not seller_contact['candidates']:
+                    async def discover_reply():
+                        try:
+                            result=await reveal_craigslist_contact(canonical)
+                            if not isinstance(result,dict): result={'status':'unavailable'}
+                            state=result.get('status','unavailable')
+                            if state not in {'revealed','unavailable','blocked','busy'}: state='unavailable'
+                            from listing_contacts import clean_email
+                            email=clean_email(result.get('email'))
+                            if state=='revealed' and email and email.rsplit('@',1)[-1].lower()=='sale.craigslist.org':
+                                seller_contact['candidates']=[{'email':email,'label':'Craigslist seller relay','source':'craigslist_reply','source_url':canonical}]
+                                seller_contact['reveal_status']='revealed'
+                            else:
+                                seller_contact['reveal_status']='unavailable' if state=='revealed' else state
+                        except Exception:
+                            # Optional contact discovery cannot discard an
+                            # otherwise usable photo import or spend a credit.
+                            seller_contact['reveal_status']='unavailable'
+                    reveal_task=asyncio.create_task(discover_reply())
             seen = set()
             # At most two image downloads at once. Never retain more than four.
             for start in range(0, min(len(candidates), 8), 2):
@@ -382,10 +406,15 @@ async def import_listing(url):
                     await asyncio.gather(*tasks, return_exceptions=True)
                 if len(photos) == MAX_PHOTOS:
                     break
+            if reveal_task:
+                await reveal_task
     except (ImportUnavailable, HTTPException, httpx.HTTPError, OSError, TimeoutError, ValueError):
         # A partial import may still be reviewed if at least one photo finished.
         pass
     finally:
+        if reveal_task and not reveal_task.done():
+            reveal_task.cancel()
+            await asyncio.gather(reveal_task,return_exceptions=True)
         _slots.release()
     now = time.time()
     seller_contact = seller_contact or empty_contact(now=now)

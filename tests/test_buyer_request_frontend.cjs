@@ -11,6 +11,9 @@ const response = (body, ok=true, status=200) => ({ok,status,json:async()=>body})
 const managementKey = 'k'.repeat(43);
 const record = (state='pending',extra={}) => ({id:'buyer-record',title:'Listing camera',status:state==='pending'?'waiting':'processing',token:'seller-capture-token',manage_key:managementKey,media:[],auto_publish:true,analysis_status:'pending',buyer_request:{state,listing_url:'https://market.example/items/123',buyer_funded:true,credit_reserved:true,expires:1795000000},...extra});
 const listingURL='https://market.example/items/123';
+const craigslistURL='https://sfbay.craigslist.org/sfc/pho/d/san-francisco-camera/7912345678.html';
+const facebookURL='https://www.facebook.com/marketplace/item/123456789012345/';
+const ebayURL='https://www.ebay.com/itm/123456789012';
 const importResult=(url=listingURL,extra={})=>({status:'ready',listing_url:url,title:'Imported camera',imported_at:1795000000,expires:1795003600,import_token:'signed-import-snapshot',max_photos:4,photos:Array.from({length:4},(_,index)=>({index,mime:'image/jpeg',data_url:'data:image/jpeg;base64,'+Buffer.from([255,216,index,255,217]).toString('base64')})),...extra});
 const emailDraft=(extra={})=>({contacts:[{email:'seller@market.example',label:'Listing seller',source:'Public listing'}],contact_url:null,recipient:'seller@market.example',subject:'Please verify the listing camera',body:'Hello seller,\n\nRecord here: https://lockx.example/#in-hand/capture/seller-capture-token\nListing: '+listingURL,draft_digest:'signed-email-draft',send_ready:true,status:'draft',...extra});
 const manualPhoto=()=>{const blob=new Blob(['manual bytes'],{type:'image/jpeg'});return {blob,url:URL.createObjectURL(blob),selected:true,source:'manual'};};
@@ -51,7 +54,7 @@ function harness(options={}) {
     querySelector(selector){return nodes.get(selector)||null;}
     querySelectorAll(selector){return selector==='input,select,[data-remove],[data-select],#ihChoosePhotos,#ihLoadListingPhotos'?['#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihChoosePhotos','#ihLoadListingPhotos'].map(id=>nodes.get(id)):[];}
   }
-  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
+  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
   nodes.get('#ihRequestForm').dataset.buyer='true';nodes.get('#ihBuyerCaptureMode').value='handheld';nodes.get('#ihBuyerTitle').value='Listing camera';nodes.get('#ihListingURL').value='https://market.example/items/123';
   const document={body:new Element(),hidden:false,readyState:'loading',querySelector:selector=>nodes.get(selector)||null,querySelectorAll:()=>[],createElement:()=>new Element(),addEventListener(){}};
   const stream={getTracks:()=>[{stop(){}}],getVideoTracks:()=>[{stop(){}}]};
@@ -91,6 +94,51 @@ test('old-server capability and unsafe listing URL fail before any credit reserv
 test('seller invitation keeps email first and offers the same safe marketplace-share alternative',()=>{
   const h=harness({share:true}),r=record();const message=h.api.buyerMessage(r),html=h.api.buyerRequestBox(r);
   assert.match(message,/#in-hand\/capture\/seller-capture-token/);assert.match(message,/https:\/\/market.example\/items\/123/);assert.doesNotMatch(message,/report\/|kkkkk|manage/i);assert.match(html,/Copy or share this message yourself/);assert.ok(html.indexOf('ihSellerEmail')<html.indexOf('ihCopyBuyerMessage'));assert.doesNotMatch(html,/request sent|message sent/i);assert.match(html,/Copy message/);assert.match(html,/Share message/);assert.match(html,/Cancel request/);assert.match(html,/noopener noreferrer/);
+});
+
+test('Facebook Marketplace and eBay show a visible copy-first request with the actual listing and no email draft fetch',async()=>{
+  for(const [listing_url,name] of [[facebookURL,'Facebook Marketplace'],[ebayURL,'eBay']]){
+    const r=record();r.buyer_request.listing_url=listing_url;
+    const h=harness({fetch:async()=>assert.fail('A platform conversation request must not fetch an email draft')});await flush();h.api.setRoute(1);h.api.setManagementKey(managementKey);await h.api.showReport(r.id,1,r);await flush();
+    const html=h.api.page.innerHTML;assert.match(html,/Copy verification request/);assert.ok(html.includes('Open '+name+' ↗'));assert.ok(html.includes('href="'+listing_url+'"'));assert.match(html,/target="_blank" rel="noopener noreferrer"/);assert.ok(html.includes('existing '+name+' conversation'));assert.match(html,/paste it, and click Send there/);assert.match(html,/id="ihBuyerMessage"[^>]*readonly/);assert.match(html,/Copying only puts the message on your clipboard/);assert.match(html,/same 1-credit check; no extra charge/);
+    assert.doesNotMatch(html,/id="ihSellerEmail"|ih-buyer-share-alternative|seller\/contact|messenger\.com|request (?:was )?sent/i);assert.ok(html.indexOf('Copy verification request')<html.indexOf('id="ihBuyerMessage"'));
+    await h.nodes.get('#ihCopyBuyerMessage').onclick();assert.equal(h.calls.clipboard[0],h.api.buyerMessage(r));assert.match(h.calls.clipboard[0],/#in-hand\/capture\/seller-capture-token/);assert.ok(h.calls.clipboard[0].includes('Listing: '+listing_url));assert.match(h.calls.clipboard[0],/10-second LockX video/);assert.match(h.calls.clipboard[0],/50¢ check/);assert.match(h.calls.clipboard[0],/free for you/);assert.match(h.calls.clipboard[0],/no LockX account/);assert.match(h.calls.clipboard[0],/review the recording and sharing permissions/);assert.doesNotMatch(h.calls.clipboard[0],/report\/|kkkkk|manage|already verified|eBay approved|eBay endorsed|pay me|payment link/i);
+    assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,0);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);assert.equal(h.calls.camera,0);
+    await h.api.loadSellerEmail(r,1);assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,0);
+  }
+});
+
+test('marketplace conversation detection recognizes mobile Facebook paths and known eBay country domains',()=>{
+  const h=harness();
+  for(const listing_url of ['https://m.facebook.com/marketplace/item/123/','https://mbasic.facebook.com/marketplace/item/123/','https://facebook.com/marketplace/item/123/']){
+    const r=record();r.buyer_request.listing_url=listing_url;assert.match(h.api.buyerRequestBox(r),/Open Facebook Marketplace ↗/);
+  }
+  for(const domain of ['ebay.com','ebay.ca','ebay.co.uk','ebay.com.au','ebay.at','ebay.be','ebay.fr','ebay.de','ebay.it','ebay.nl','ebay.es','ebay.ch','ebay.com.hk','ebay.ie','ebay.ph','ebay.pl','ebay.co.th','ebay.vn','ebay.co.jp']){
+    const r=record();r.buyer_request.listing_url='https://www.'+domain+'/itm/123456789012';assert.match(h.api.buyerRequestBox(r),/Open eBay ↗/,domain);
+  }
+  const r=record();r.buyer_request.listing_url='https://m.ebay.co.uk/itm/123456789012';assert.match(h.api.buyerRequestBox(r),/Open eBay ↗/);assert.match(h.api.buyerMessage(r),/this is only an item verification request/);
+});
+
+test('eBay link restrictions are visible beside Copy and before request creation without affecting Facebook',async()=>{
+  const r=record();r.buyer_request.listing_url=ebayURL;const h=harness();await flush();
+  const html=h.api.buyerRequestBox(r);assert.match(html,/eBay restricts external links and may block this request\. Keep your purchase and payment on eBay\./);assert.ok(html.indexOf('eBay restricts external links')<html.indexOf('Copy verification request'));assert.match(html,/if the platform allows the verification link/);assert.match(h.api.buyerMessage(r),/Purchase and payment stay on eBay; this is only an item verification request\./);
+  h.api.showBuyer(ebayURL);assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,false);assert.match(h.nodes.get('#ihMarketplacePolicy').textContent,/before creating a request and reserving 1 credit/);assert.equal(h.calls.ensure,0);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
+  h.nodes.get('#ihListingURL').value=facebookURL;h.nodes.get('#ihListingURL').oninput();assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,true);r.buyer_request.listing_url=facebookURL;assert.doesNotMatch(h.api.buyerRequestBox(r),/eBay restricts|if the platform allows/);assert.doesNotMatch(h.api.buyerMessage(r),/payment stay on eBay/);
+  h.nodes.get('#ihListingURL').value=ebayURL;h.nodes.get('#ihListingURL').oninput();assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,false);assert.equal(h.calls.ensure,0);
+});
+
+test('ambiguous paths and spoofed platform domains retain the generic email workflow',async()=>{
+  for(const listing_url of ['https://facebook.com/marketplacefake/item/123','https://www.facebook.com/profile.php?id=123','https://facebook.com.evil.example/marketplace/item/123','https://notfacebook.com/marketplace/item/123','https://ebay.com.evil.example/itm/123','https://notebay.com/itm/123','https://ebay.example/itm/123']){
+    const r=record();r.buyer_request.listing_url=listing_url;
+    const h=harness({fetch:async()=>response(emailDraft())});await flush();h.api.setRoute(1);await h.api.showReport(r.id,1,r);await flush();
+    assert.match(h.api.page.innerHTML,/id="ihSellerEmail"/);assert.doesNotMatch(h.api.page.innerHTML,/Open Facebook Marketplace|Open eBay|Copy verification request/);assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,1);
+  }
+});
+
+test('platform clipboard failure selects the visible prepared message without sending',async()=>{
+  const r=record();r.buyer_request.listing_url=facebookURL;
+  const h=harness({clipboardFail:true});await flush();h.api.setRoute(1);await h.api.showReport(r.id,1,r);await h.nodes.get('#ihCopyBuyerMessage').onclick();
+  assert.equal(h.nodes.get('#ihBuyerMessage').focused,true);assert.equal(h.nodes.get('#ihBuyerMessage').selected,true);assert.equal(h.requests.filter(request=>request.init.method==='POST'||request.url.endsWith('/seller-email')).length,0);assert.equal(h.calls.ensure,0);
 });
 
 test('native sharing failure falls back to copying the same seller message',async()=>{
@@ -171,6 +219,29 @@ test('an import stalled in the browser times out with a usable retry and no cred
   const h=harness({fetch:(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(Error('Timed out'))))});await flush();
   const original=manualPhoto();h.api.setPhotos([original]);const loading=h.api.loadListingPhotos();await runTimer(h,25000);await loading;
   assert.equal(h.api.getPhotos()[0],original);assert.equal(h.nodes.get('#ihLoadListingPhotos').disabled,false);assert.match(h.nodes.get('#ihListingImportStatus').textContent,/Add screenshot or photos/);assert.equal(h.calls.ensure,0);
+});
+
+test('Craigslist import explains the Reply email attempt while loading and keeps it free',async()=>{
+  let finish;const h=harness({fetch:()=>new Promise(resolve=>finish=resolve)});await flush();h.nodes.get('#ihListingURL').value=craigslistURL;
+  const original=manualPhoto();h.api.setPhotos([original]);const loading=h.api.loadListingPhotos();
+  assert.match(h.nodes.get('#ihListingImportStatus').textContent,/Loading listing photos and trying Craigslist Reply → email/);assert.equal(h.api.getPhotos()[0],original);assert.equal(h.nodes.get('#ihLoadListingPhotos').disabled,true);
+  finish(response(importResult(craigslistURL,{seller_contact:{reveal_status:'revealed',candidates:[{email:'camera-relay@sale.craigslist.org',source:'craigslist_reply'}]}})));await loading;
+  assert.equal(h.api.getPhotos().length,4);assert.match(h.nodes.get('#ihListingImportStatus').textContent,/Seller email found through Craigslist Reply/);assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);assert.equal(h.calls.camera,0);
+});
+
+test('blocked and busy Craigslist Reply checks preserve successful photos and signed contact provenance',async()=>{
+  for(const reveal_status of ['blocked','busy','unavailable']){
+    const h=harness({fetch:async url=>response(url.endsWith('/listing-import')?importResult(craigslistURL,{seller_contact:{reveal_status,candidates:[],contact_url:reveal_status==='blocked'?craigslistURL:null}}):record())});await flush();h.nodes.get('#ihListingURL').value=craigslistURL;
+    await h.api.loadListingPhotos();assert.equal(h.api.getPhotos().length,4);assert.equal(h.nodes.get('#ihListingImportStatus').dataset.state,'ready');assert.match(h.nodes.get('#ihListingImportStatus').textContent,/Loaded 4 listing photos.*No credit was used.*Reply email could not load automatically/);assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);
+    h.api.setPhotos([manualPhoto()]);await h.api.createRequest({preventDefault(){}});const payload=JSON.parse(h.requests.find(request=>request.url.endsWith('/requests')).init.body.get('payload'));
+    assert.equal(payload.contact_import_token,'signed-import-snapshot');assert.equal(payload.import_token,undefined);assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')&&request.init.method==='POST').length,0);
+  }
+});
+
+test('a Craigslist contact fallback survives an unavailable photo import without replacing manual photos',async()=>{
+  const h=harness({fetch:async url=>response(url.endsWith('/listing-import')?importResult(craigslistURL,{status:'unavailable',photos:[],import_token:'signed-contact-fallback',seller_contact:{reveal_status:'blocked',candidates:[],contact_url:craigslistURL}}):record())});await flush();h.nodes.get('#ihListingURL').value=craigslistURL;
+  const original=manualPhoto();h.api.setPhotos([original]);await h.api.loadListingPhotos();assert.equal(h.api.getPhotos()[0],original);assert.match(h.nodes.get('#ihListingImportStatus').textContent,/current photos are kept.*Reply email could not load automatically/);assert.equal(h.calls.ensure,0);
+  await h.api.createRequest({preventDefault(){}});const payload=JSON.parse(h.requests.find(request=>request.url.endsWith('/requests')).init.body.get('payload'));assert.equal(payload.contact_import_token,'signed-contact-fallback');assert.equal(payload.import_token,undefined);
 });
 
 test('new URL input immediately aborts a pending import and its late response cannot replace photos',async()=>{
@@ -299,6 +370,38 @@ test('mail-app fallback encodes the reviewed email and template, strips subject 
   assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/No seller email was found/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Open seller contact page/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Open prepared email/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/opening it does not send/);
   assert.equal(h.api.preparedEmailURL(h.api.sellerEmailState(record())),'');h.nodes.get('#ihSellerEmailRecipient').value='manual@market.example';h.nodes.get('#ihSellerEmailRecipient').oninput();
   const url=h.nodes.get('#ihOpenSellerEmail').attributes.href;assert.ok(url.startsWith('mailto:manual%40market.example?subject='));assert.ok(url.includes('body=Hi%20seller%2C%0D%0AItem%3F%20%26%20details%20%231'));assert.ok(!url.split('&body=')[0].includes('%0D'));assert.equal((url.match(/&/g)||[]).length,1);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
+});
+
+test('Craigslist Reply email is selected automatically for review without sending or exposing source codes',async()=>{
+  const r=record();r.buyer_request.listing_url=craigslistURL;
+  const h=harness({fetch:async()=>response(emailDraft({contacts:[{email:'camera-relay@sale.craigslist.org',label:'Listing seller',source:'craigslist_reply'}],recipient:'camera-relay@sale.craigslist.org',contact_reveal_status:'revealed'}))});await flush();await h.api.loadSellerEmail(r,1);
+  assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'camera-relay@sale.craigslist.org');assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Found through Craigslist Reply/);assert.doesNotMatch(h.nodes.get('#ihSellerEmail').innerHTML,/craigslist_reply|contact_reveal_status|No seller email|request sent/i);
+  assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);
+});
+
+test('Craigslist blocked, busy, and unavailable Reply checks offer a paste relay fallback without claiming no email exists',async()=>{
+  for(const contact_reveal_status of ['blocked','busy','unavailable']){
+    const r=record();r.buyer_request.listing_url=craigslistURL;
+    const contact_url=contact_reveal_status==='blocked'?craigslistURL:null,h=harness({fetch:async()=>response(emailDraft({contacts:[],recipient:'',contact_reveal_status,contact_url}))});await flush();await h.api.loadSellerEmail(r,1);
+    const html=h.nodes.get('#ihSellerEmail').innerHTML;assert.match(html,/This listing keeps contact details behind Reply\. Open Craigslist, choose Reply then email, and paste the relay address here\./);assert.match(html,/Craigslist relay email/);assert.match(html,/aria-describedby="ihSellerEmailContactHelp"/);assert.match(html,/Copy the full email address shown under Reply → email/);assert.doesNotMatch(html,/No seller email was found|craigslist_reply|contact_reveal_status/);
+    if(contact_url){assert.ok(html.includes('href="'+craigslistURL+'"'));assert.match(html,/Open Craigslist ↗/);assert.ok(html.indexOf('Open Craigslist ↗')<html.indexOf('id="ihSellerEmailRecipient"'));}else assert.doesNotMatch(html,/Open Craigslist ↗/);
+    assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);h.nodes.get('#ihSellerEmailRecipient').value='pasted-relay@sale.craigslist.org';h.nodes.get('#ihSellerEmailRecipient').oninput();assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);
+    assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);
+  }
+});
+
+test('Craigslist contact assistance is scoped to the actual marketplace hostname and safe observed contact URLs',async()=>{
+  for(const listing_url of ['https://craigslist.org.evil.example/item','https://notcraigslist.org/item']){
+    const r=record();r.buyer_request.listing_url=listing_url;
+    const h=harness({fetch:async()=>response(emailDraft({contacts:[],recipient:'',contact_reveal_status:'blocked',contact_url:'javascript:alert(1)'}))});await flush();await h.api.loadSellerEmail(r,1);
+    assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/No seller email was found/);assert.doesNotMatch(h.nodes.get('#ihSellerEmail').innerHTML,/Craigslist relay email|Open Craigslist|javascript:/);
+  }
+});
+
+test('a locked Craigslist email retry keeps the reviewed relay recipient without restarting contact fallback',async()=>{
+  const r=record();r.buyer_request.listing_url=craigslistURL;
+  const h=harness({fetch:async()=>response(emailDraft({contacts:[],recipient:'reviewed-relay@sale.craigslist.org',recipient_locked:true,contact_reveal_status:'blocked'}))});await flush();await h.api.loadSellerEmail(r,1);
+  assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'reviewed-relay@sale.craigslist.org');assert.equal(h.nodes.get('#ihSellerEmailRecipient').disabled,true);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Review the fixed recipient and retry this same email/);assert.doesNotMatch(h.nodes.get('#ihSellerEmail').innerHTML,/No seller email was found|paste the relay address here|ihSellerEmailContactHelp/);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
 });
 
 test('draft preparation failure keeps copy/share available and retries only when clicked',async()=>{

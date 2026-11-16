@@ -286,10 +286,15 @@ def validate_contact(value, base_url, imported_at):
     for item in value['candidates']:
         if (not isinstance(item, dict) or not clean_email(item.get('email'))
                 or clean_email(item.get('email')) != item.get('email')
-                or item.get('source') not in {'listing_mailto', 'structured_seller'}
+                or item.get('source') not in {'listing_mailto', 'structured_seller', 'craigslist_reply'}
                 or item.get('source_url') != base_url or not isinstance(item.get('label'), str)
                 or _text(item['label'], 100) != item['label']):
             raise ValueError('Invalid seller contact')
+        if item['source']=='craigslist_reply':
+            from craigslist_contact import is_craigslist_listing_url
+            if (not is_craigslist_listing_url(base_url) or value.get('reveal_status')!='revealed'
+                    or item['email'].rsplit('@',1)[-1].lower()!='sale.craigslist.org'):
+                raise ValueError('Invalid Craigslist relay provenance')
         if any(entry['email'].lower() == item['email'].lower() for entry in result['candidates']):
             raise ValueError('Duplicate seller contact')
         result['candidates'].append({key: item[key] for key in ('email', 'label', 'source', 'source_url')})
@@ -297,4 +302,10 @@ def validate_contact(value, base_url, imported_at):
     if contact_url is not None and safe_contact_url(contact_url, base_url) != contact_url:
         raise ValueError('Invalid seller contact link')
     result['contact_url'] = contact_url
+    if 'reveal_status' in value:
+        from craigslist_contact import is_craigslist_listing_url
+        if (value['reveal_status'] not in {'revealed','unavailable','blocked','busy','not_needed'}
+                or not is_craigslist_listing_url(base_url)):
+            raise ValueError('Invalid contact reveal status')
+        result['reveal_status']=value['reveal_status']
     return result
