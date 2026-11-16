@@ -130,12 +130,12 @@ function recordingHarness({cameraPending=false}={}){
     $:element,api:async(path)=>{calls.requests.push(path);return {json:async()=>({session_id:'original-session',stage:{instruction:'Turn the item'}})};},
     hasLocalCaptureConsent:()=>true,renderCamera(){},positionReticle(){},speak(){},pumpChunks(){},enqueueChunks(){},renderUploadStatus(){},updateCameraFeedback(){},finishCapture(){},
     errorAt:(selector,error)=>calls.errors.push(error.message),captureFailed:message=>calls.errors.push(message),
-    closeSellerEvents(){},clearMarkedFiles(){},route(){}});
+    closeSellerEvents(){},clearMarkedFiles(){},cancelListingImport(){},route(){}});
   // Use the real generation state, camera start/stop, optional-location helpers
   // and lifecycle handlers so this catches their interaction, not just a mock.
   const mainState=source.split('\n').find(line=>line.startsWith('  let photos ='));
   const auxiliaryState=source.split('\n').find(line=>line.startsWith('  let markedFiles='));
-  const generation=source.includes('let captureStartNumber')?source.split('\n').find(line=>line.includes('let captureStartNumber')): 'let captureStartNumber=0;';
+  const generation=source.split('\n').find(line=>/^\s*let .*captureStartNumber\s*=/.test(line))||'let captureStartNumber=0;';
   const globals=mainState+'\n'+auxiliaryState+'\n'+(auxiliaryState.includes('captureStartNumber')?'':generation)+'\n';
   const helpers=source.slice(source.indexOf('  function activeCapture(current){'),source.indexOf('  function renderCamera(current)'));
   const handlers=source.slice(source.indexOf("  window.addEventListener('pagehide'"),source.indexOf("  api('/capabilities')"));

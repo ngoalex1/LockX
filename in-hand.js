@@ -37,6 +37,8 @@
   function queueKicker(record){return {queued:'Submission saved · Waiting in line',running:'Camera off · Comparing your photos',retrying:'Submission saved · Automatic retry',budget_wait:'Submission saved · Waiting for capacity',failed:'Submission saved · Comparison interrupted'}[queueInfo(record)?.state]||'';}
   let photos = [], capabilities = null, routeNumber = 0, poll = null, reportURLs = [], capture = null, sellerData = null, sellerToken = null, isStandalone = false;
   let managementKey = '', reportRenderNumber = 0, captureStartNumber = 0, buyerAttempt = null, publicEvidenceContainer = null;
+  const maxPhotos = 4;
+  let listingImportNumber=0, listingImportRequest=null, listingImportTimer=null, listingImportDeadline=null, photoEditNumber=0, buyerCreating=false, buyerCreationNumber=0;
   const reportMedia = new Map();
   let markedFiles=null, photoPreparation=null, sellerEvents=null, sellerEventsDisabled=false, sellerResultNumber=0, sellerResultRequest=null, retryLightToken=null, retryConsentToken=null, autoStartRetryToken=null;
   const secretPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -133,7 +135,7 @@
     },delay);
   }
   function showHome() {
-    page.innerHTML = `${heading()}<div class="ih-layout"><div><form id="ihRequestForm" class="ih-card"><div class="ih-card-top"><span class="ih-step-number" aria-hidden="true">＋</span><div><h2>Add your photos.</h2><p>Choose up to six views of the same item.</p></div></div><div class="ih-upload"><button type="button" class="ih-button secondary" id="ihChoosePhotos">＋ Add photos</button><input id="ihPhotoInput" type="file" accept="image/*" multiple hidden><p>Front, back, and the details that make it yours.</p></div><div id="ihPhotoGrid" class="ih-photo-grid"></div><div id="ihPhotoError" class="ih-note error" role="alert" hidden></div><label class="ih-check"><input type="checkbox" name="consent" required><span>I have permission to submit these photos and record the item. Automatically create QR-marked copies and a public verification record for the photos that pass verification, even if other photos do not match. Only approved photos become public automatically. At recording, the person holding the item chooses whether the video, supporting frames, and AI highlights can also be shared.</span></label><div id="ihCreateError" class="ih-note error" role="alert" hidden></div><div class="ih-form-footer"><small>No login needed to create a check or view your results. The camera link lasts 24 hours.</small><button class="ih-button" type="submit" id="ihCreate">Continue to verification <span>→</span></button></div><div id="ihCreated"></div></form></div><aside class="ih-aside ih-card"><h3>Three simple steps.</h3><ol><li><strong>Choose your photos.</strong>Add the exact images you want to verify.</li><li><strong>Show the item.</strong>Open the camera on your phone and turn the item for 10 seconds. Recording stops automatically.</li><li><strong>Save your verified images.</strong>Your approved photos appear here with QR codes, ready to save. Other photos stay unverified.</li></ol><div class="ih-note">${esc(scope)}</div></aside></div><details class="ih-history" id="ihHistory" hidden><summary>Your verifications on this device</summary><div class="ih-section-title"><h2>Recent verifications</h2><button class="ih-button text" id="ihRefresh">Refresh ↻</button></div><div id="ihRequests" aria-live="polite"></div></details>`;
+    page.innerHTML = `${heading()}<div class="ih-layout"><div><form id="ihRequestForm" class="ih-card"><div class="ih-card-top"><span class="ih-step-number" aria-hidden="true">＋</span><div><h2>Add your photos.</h2><p>Choose up to four views of the same item.</p></div></div><div class="ih-upload"><button type="button" class="ih-button secondary" id="ihChoosePhotos">＋ Add photos</button><input id="ihPhotoInput" type="file" accept="image/*" multiple hidden><p>Front, back, and the details that make it yours.</p></div><div id="ihPhotoGrid" class="ih-photo-grid"></div><div id="ihPhotoError" class="ih-note error" role="alert" hidden></div><label class="ih-check"><input type="checkbox" name="consent" required><span>I have permission to submit these photos and record the item. Automatically create QR-marked copies and a public verification record for the photos that pass verification, even if other photos do not match. Only approved photos become public automatically. At recording, the person holding the item chooses whether the video, supporting frames, and AI highlights can also be shared.</span></label><div id="ihCreateError" class="ih-note error" role="alert" hidden></div><div class="ih-form-footer"><small>No login needed to create a check or view your results. The camera link lasts 24 hours.</small><button class="ih-button" type="submit" id="ihCreate">Continue to verification <span>→</span></button></div><div id="ihCreated"></div></form></div><aside class="ih-aside ih-card"><h3>Three simple steps.</h3><ol><li><strong>Choose your photos.</strong>Add the exact images you want to verify.</li><li><strong>Show the item.</strong>Open the camera on your phone and turn the item for 10 seconds. Recording stops automatically.</li><li><strong>Save your verified images.</strong>Your approved photos appear here with QR codes, ready to save. Other photos stay unverified.</li></ol><div class="ih-note">${esc(scope)}</div></aside></div><details class="ih-history" id="ihHistory" hidden><summary>Your verifications on this device</summary><div class="ih-section-title"><h2>Recent verifications</h2><button class="ih-button text" id="ihRefresh">Refresh ↻</button></div><div id="ihRequests" aria-live="polite"></div></details>`;
     $('.ih-hero').insertAdjacentHTML('afterend','<div id="ihServiceState" class="ih-note warning" style="margin-bottom:22px" hidden></div>');
     serviceState();
     $('#ihChoosePhotos').onclick = () => $('#ihPhotoInput').click();
@@ -142,19 +144,94 @@
     $('#ihRefresh').onclick = loadRequests;
     renderPhotos(); loadRequests(); window.LockXCredits?.decorate();
   }
-  function showBuyer(listing='') {
+  function showBuyer(listing='',skipImport=false) {
     if(buyerAttempt){showBuyerAttempt();return;}
-    page.innerHTML=`<div class="ih-hero ih-buyer-hero"><div><a class="ih-button text" href="#in-hand">Selling? Verify your own photos →</a><span class="ih-kicker">For buyers · Any marketplace</span><h1>Ask for proof.<br>Before you buy.</h1><p class="ih-lead">Use the seller’s listing photos to request a fresh 10-second item video. You pay for the check. The seller records for free, without an account.</p><div class="ih-pills"><span>1 credit · 50¢</span><span>24-hour recording link</span><span>You share the request</span></div></div></div><div id="ihServiceState" class="ih-note warning" hidden></div><div class="ih-layout"><form id="ihRequestForm" class="ih-card ih-buyer-form" data-buyer="true"><div class="ih-card-top"><span class="ih-step-number" aria-hidden="true">＋</span><div><h2>Start with the listing.</h2><p>Choose the exact photos you want the seller to show.</p></div></div><label>Public listing link<input id="ihListingURL" name="listing_url" type="url" inputmode="url" autocomplete="url" placeholder="https://…" value="${esc(listing)}" maxlength="2000" required><small>Paste a selling link from any marketplace. LockX does not import photos from the link.</small></label><label>Item title<input id="ihBuyerTitle" name="title" minlength="2" maxlength="160" placeholder="e.g. The camera in this listing" required></label><label>How should the seller show it? <small>Optional</small><select id="ihBuyerCaptureMode" name="capture_mode"><option value="handheld">Item in hand</option><option value="flat">Card or flat item</option><option value="stationary">Large or heavy item</option><option value="digital">Digital item on a second screen</option></select></label><div class="ih-upload"><button type="button" class="ih-button secondary" id="ihChoosePhotos">＋ Add listing photos</button><input id="ihPhotoInput" type="file" accept="image/*" multiple hidden><p>Save 1–6 photos from the listing, then add them here. Use views of the same item.</p></div><div id="ihPhotoGrid" class="ih-photo-grid"></div><div id="ihPhotoError" class="ih-note error" role="alert" hidden></div><label class="ih-check"><input type="checkbox" name="consent" required><span>I have permission to submit these listing photos for comparison and publish the photos that pass as QR-marked proof. The seller must agree separately to recording and sharing their video, supporting frames, and AI highlights.</span></label><div id="ihCreateError" class="ih-note error" role="alert" hidden></div><div class="ih-form-footer"><small>1 credit (50¢) is reserved when you create the request. It is returned if declined, cancelled, or expired before submission.</small><button class="ih-button" type="submit" id="ihCreate">Create seller request <span>→</span></button></div><div id="ihCreated"></div></form><aside class="ih-aside ih-card"><h3>You ask. The seller shows.</h3><ol><li><strong>Add the listing and photos.</strong>Choose the details you want checked.</li><li><strong>Send your request.</strong>Copy the ready-to-send message into your marketplace conversation.</li><li><strong>Review the evidence.</strong>Keep your private link. This page updates when the seller submits and the comparison finishes.</li></ol><div class="ih-note">${esc(scope)}</div></aside></div>`;
-    $('#ihChoosePhotos').onclick=()=>$('#ihPhotoInput').click();$('#ihPhotoInput').onchange=addPhotos;$('#ihRequestForm').onsubmit=createRequest;renderPhotos();serviceState();window.LockXCredits?.decorate();
+    page.innerHTML=`<div class="ih-hero ih-buyer-hero"><div><a class="ih-button text" href="#in-hand">Selling? Verify your own photos →</a><span class="ih-kicker">For buyers · Any marketplace</span><h1>Ask for proof.<br>Before you buy.</h1><p class="ih-lead">Use the seller’s listing photos to request a fresh 10-second item video. You pay for the check. The seller records for free, without an account.</p><div class="ih-pills"><span>1 credit · 50¢</span><span>24-hour recording link</span><span>You share the request</span></div></div></div><div id="ihServiceState" class="ih-note warning" hidden></div><div class="ih-layout"><form id="ihRequestForm" class="ih-card ih-buyer-form" data-buyer="true"><div class="ih-card-top"><span class="ih-step-number" aria-hidden="true">＋</span><div><h2>Start with the listing.</h2><p>Choose the exact photos you want the seller to show.</p></div></div><label>Public listing link<input id="ihListingURL" name="listing_url" type="url" inputmode="url" autocomplete="url" placeholder="https://…" value="${esc(listing)}" maxlength="2000" required><small>We’ll try to load up to four public listing photos. Some marketplaces block access.</small></label><div class="ih-listing-import"><button type="button" class="ih-button secondary" id="ihLoadListingPhotos">Load listing photos</button><p id="ihListingImportStatus" role="status" aria-live="polite">Loading photos is free. No account needed.</p></div><label>Item title<input id="ihBuyerTitle" name="title" minlength="2" maxlength="160" placeholder="e.g. The camera in this listing" required></label><label>How should the seller show it? <small>Optional</small><select id="ihBuyerCaptureMode" name="capture_mode"><option value="handheld">Item in hand</option><option value="flat">Card or flat item</option><option value="stationary">Large or heavy item</option><option value="digital">Digital item on a second screen</option></select></label><div class="ih-upload"><button type="button" class="ih-button secondary" id="ihChoosePhotos">＋ Add screenshot or photos</button><input id="ihPhotoInput" type="file" accept="image/*" multiple hidden><p>Choose 1–4 photos of the same item. If photos cannot load, add a screenshot or photos from the listing.</p></div><div id="ihPhotoGrid" class="ih-photo-grid"></div><div id="ihPhotoError" class="ih-note error" role="alert" hidden></div><label class="ih-check"><input type="checkbox" name="consent" required><span>I have permission to submit these listing photos for comparison and publish the photos that pass as QR-marked proof. The seller must agree separately to recording and sharing their video, supporting frames, and AI highlights.</span></label><div id="ihCreateError" class="ih-note error" role="alert" hidden></div><div class="ih-form-footer"><small>1 credit (50¢) is reserved when you create the request. It is returned if declined, cancelled, or expired before submission.</small><button class="ih-button" type="submit" id="ihCreate">Create seller request <span>→</span></button></div><div id="ihCreated"></div></form><aside class="ih-aside ih-card"><h3>You ask. The seller shows.</h3><ol><li><strong>Add the listing and photos.</strong>Choose the details you want checked.</li><li><strong>Send your request.</strong>Copy the ready-to-send message into your marketplace conversation.</li><li><strong>Review the evidence.</strong>Keep your private link. This page updates when the seller submits and the comparison finishes.</li></ol><div class="ih-note">${esc(scope)}</div></aside></div>`;
+    cancelListingImport();
+    $('#ihChoosePhotos').onclick=()=>$('#ihPhotoInput').click();$('#ihPhotoInput').onchange=addPhotos;$('#ihRequestForm').onsubmit=createRequest;
+    $('#ihLoadListingPhotos').onclick=()=>loadListingPhotos();
+    const field=$('#ihListingURL');
+    field.oninput=()=>scheduleListingImport(550);field.onchange=()=>scheduleListingImport(0);
+    field.onpaste=()=>scheduleListingImport(0,true);
+    $('#ihBuyerTitle').oninput=()=>{cancelListingImport();listingImportStatus('Your edits are kept. Load listing photos to try again.');};
+    renderPhotos();serviceState();window.LockXCredits?.decorate();
+    if(!skipImport&&safeListingURL(listing))scheduleListingImport(0);
+
   }
-  function lockBuyerAttempt() {
+  function listingImportStatus(message,state='idle') {
+    const status=$('#ihListingImportStatus'),button=$('#ihLoadListingPhotos');
+    if(status){status.textContent=message;status.dataset.state=state;}
+    if(button){button.disabled=state==='loading'||buyerCreating||!!buyerAttempt;button.textContent=state==='loading'?'Loading photos…':state==='ready'?'Reload listing photos':'Load listing photos';}
+  }
+  function cancelListingImport() {
+    clearTimeout(listingImportTimer);listingImportTimer=null;listingImportNumber++;
+    clearTimeout(listingImportDeadline);listingImportDeadline=null;
+    listingImportRequest?.abort();listingImportRequest=null;
+    const button=$('#ihLoadListingPhotos');if(button){button.disabled=buyerCreating||!!buyerAttempt;button.textContent='Load listing photos';}
+  }
+  function scheduleListingImport(delay=550,afterPaste=false) {
+    cancelListingImport();if(buyerAttempt||buyerCreating)return;
+    const listing=safeListingURL($('#ihListingURL')?.value);
+    if(!listing&&!afterPaste){listingImportStatus('Enter a public listing link to load photos. You can also add screenshot or photos.');return;}
+    listingImportStatus('Loading listing photos is free. Your current photos stay until new photos load.');
+    const route=routeNumber,number=listingImportNumber;
+    listingImportTimer=setTimeout(()=>{listingImportTimer=null;if(route===routeNumber&&number===listingImportNumber)loadListingPhotos();},delay);
+  }
+  function notePhotoEdit() {
+    const pending=!!listingImportRequest||listingImportTimer!==null;
+    photoEditNumber++;cancelListingImport();
+    if(pending)listingImportStatus('Your photo selection is kept. Load listing photos to try again.');
+  }
+  function importedPhoto(photo,listing,token,importedAt) {
+    if(!photo||photo.mime!=='image/jpeg'||!Number.isInteger(photo.index)||photo.index<0||photo.index>=maxPhotos||typeof photo.data_url!=='string'||photo.data_url.length>7*1024*1024||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(photo.data_url))throw Error('The listing photos could not be opened.');
+    const binary=atob(photo.data_url.slice(photo.data_url.indexOf(',')+1)),bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    const blob=new Blob([bytes],{type:'image/jpeg'});
+    if(!blob.size||blob.size>5*1024*1024)throw Error('The listing photos could not be opened.');
+    // Preserve these exact bytes: the server checks them against the import snapshot.
+    return {blob,url:URL.createObjectURL(blob),selected:true,source:'listing_import',listingURL:listing,importToken:token,importedIndex:photo.index,importedAt};
+  }
+  async function loadListingPhotos() {
+    if(buyerAttempt||buyerCreating||$('#ihRequestForm')?.dataset.buyer!=='true')return;
+    cancelListingImport();
+    if(photoPreparation){listingImportStatus('Your added photos are still preparing. Load listing photos when they are ready.');return;}
+    const listing=safeListingURL($('#ihListingURL')?.value);
+    if(!listing){listingImportStatus('Enter a public listing link starting with https:// or http://. Add screenshot or photos if needed.','unavailable');return;}
+    if(capabilities&&capabilities.listing_photo_import===false){listingImportStatus('Listing photos cannot load on this server. Add screenshot or photos.','unavailable');return;}
+    const request=new AbortController(),number=listingImportNumber,route=routeNumber,edits=photoEditNumber,title=$('#ihBuyerTitle')?.value||'';
+    const deadline=setTimeout(()=>request.abort(),25000);listingImportDeadline=deadline;
+    listingImportRequest=request;listingImportStatus('Loading public listing photos… Your current photos stay until loading succeeds.','loading');
+    const current=()=>number===listingImportNumber&&route===routeNumber&&!buyerAttempt&&!buyerCreating&&edits===photoEditNumber&&safeListingURL($('#ihListingURL')?.value)===listing&&$('#ihRequestForm')?.dataset.buyer==='true';
+    const prepared=[];let applied=false;
+    try {
+      const result=await(await api('/listing-import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:listing}),signal:request.signal})).json();
+      if(!current())return;
+      if(result.status!=='ready'||safeListingURL(result.listing_url)!==listing||typeof result.import_token!=='string'||!result.import_token||!Array.isArray(result.photos)||!result.photos.length||result.photos.length>maxPhotos)throw Error('This site did not share usable listing photos.');
+      const indices=new Set();
+      for(const item of result.photos){if(indices.has(item.index))throw Error('The listing photos could not be opened.');indices.add(item.index);prepared.push(importedPhoto(item,listing,result.import_token,result.imported_at));}
+      if(!current())return;
+      photos.forEach(photo=>URL.revokeObjectURL(photo.url));photos=prepared.slice();photoEditNumber++;applied=true;
+      const titleField=$('#ihBuyerTitle');if(titleField&&titleField.value===title&&!title.trim()&&typeof result.title==='string')titleField.value=result.title.trim().slice(0,160);
+      renderPhotos();listingImportStatus(`Loaded ${photos.length} listing ${photos.length===1?'photo':'photos'}. Choose the views to check. No credit was used.`,'ready');
+    } catch(error) {
+      if(current())listingImportStatus('Listing photos could not load from this site. Add screenshot or photos, or try loading again. Your current photos are kept.','unavailable');
+    } finally {
+      clearTimeout(deadline);if(listingImportDeadline===deadline)listingImportDeadline=null;
+      if(number===listingImportNumber){listingImportRequest=null;const button=$('#ihLoadListingPhotos');if(button)button.disabled=buyerCreating||!!buyerAttempt;}
+      if(!applied)prepared.forEach(photo=>URL.revokeObjectURL(photo.url));
+    }
+  }
+  function lockBuyerAttempt(locked=true) {
     const form=$('#ihRequestForm');if(!form)return;
-    form.querySelectorAll('input,select,[data-remove],[data-select],#ihChoosePhotos').forEach(input=>input.disabled=true);
+    form.querySelectorAll('input,select,[data-remove],[data-select],#ihChoosePhotos,#ihLoadListingPhotos').forEach(input=>input.disabled=locked);
   }
   function showBuyerAttempt() {
     // An uncertain POST is retried with exactly the same photos and nonce.
-    const attempt=buyerAttempt;buyerAttempt=null;showBuyer(attempt.payload.listing_url);buyerAttempt=attempt;
+    const attempt=buyerAttempt;photos.forEach(photo=>URL.revokeObjectURL(photo.url));
+    photos=attempt.photos.map(photo=>({...photo,url:URL.createObjectURL(photo.blob),selected:true}));
+    buyerAttempt=null;showBuyer(attempt.payload.listing_url,true);buyerAttempt=attempt;
     $('#ihBuyerTitle').value=attempt.payload.title;$('#ihBuyerCaptureMode').value=attempt.payload.capture_mode;lockBuyerAttempt();
+    listingImportStatus('These photos are fixed for this request. Use Retry this request below.');
     $('#ihCreate').textContent='Retry this request →';
     errorAt('#ihCreateError',Error('This request has not been confirmed. Retry to check or create the same request; it will not reserve another credit.'));
   }
@@ -176,12 +253,15 @@
       const blob = await new Promise(resolve => canvas.toBlob(resolve,'image/jpeg',.86));
       if (!blob || blob.size > 5 * 1024 * 1024) throw Error('This image could not be resized. Try a JPEG or PNG copy.');
       canvas.width = canvas.height = 1;
-      return {blob, url:URL.createObjectURL(blob), selected:true};
+      return {blob, url:URL.createObjectURL(blob), selected:true, source:'manual'};
     } catch (error) { throw Error(error.message?.includes('image') ? error.message : 'This photo format cannot be opened here. Try a JPEG or PNG copy.'); }
     finally { if(canvas)canvas.width=canvas.height=1;URL.revokeObjectURL(sourceURL); }
   }
   async function addPhotos(e) {
+    if($('#ihRequestForm')?.dataset.buyer==='true'&&(buyerAttempt||buyerCreating))return;
     const files = [...e.target.files]; e.target.value = '';
+    if(!files.length)return;
+    if($('#ihRequestForm')?.dataset.buyer==='true')notePhotoEdit();
     const button = $('#ihChoosePhotos'),create=$('#ihCreate'),route=routeNumber,batch={cancelled:false};
     if(photoPreparation)photoPreparation.cancelled=true;photoPreparation=batch;
     button.disabled = true; button.textContent = 'Preparing photos…';if(create)create.disabled=true;
@@ -189,7 +269,7 @@
     const prepared=new Array(files.length);let next=0,finished=0;
     const current=()=>photoPreparation===batch&&!batch.cancelled&&route===routeNumber;
     try {
-      if (photos.length + files.length > 6) throw Error('Keep up to six photos. Remove a photo before adding another.');
+      if (photos.length + files.length > 4) throw Error('Keep up to four photos. Remove a photo before adding another.');
       // Two decoding canvases at most; preserve source order even if a later image finishes first.
       async function worker(){
         while(current()&&next<files.length){
@@ -206,23 +286,32 @@
     } catch (error) { if(current())errorAt('#ihPhotoError',error); }
     finally {
       if(!current())prepared.forEach(entry=>{if(entry?.photo)URL.revokeObjectURL(entry.photo.url);});
-      else{photoPreparation=null;button.disabled=false;button.textContent='＋ Add photos';if(create)create.disabled=false;}
+      else{photoPreparation=null;button.disabled=false;button.textContent=$('#ihRequestForm')?.dataset.buyer==='true'?'＋ Add screenshot or photos':'＋ Add photos';if(create)create.disabled=false;}
     }
   }
   function renderPhotos() {
     const grid = $('#ihPhotoGrid'); if (!grid) return;
-    grid.innerHTML = photos.map((p,i)=>`<div class="ih-photo-tile"><img src="${p.url}" alt="Selected reference photo ${i+1}"><button type="button" class="ih-remove" data-remove="${i}" aria-label="Remove photo ${i+1}">×</button><div class="ih-photo-meta"><label><input type="checkbox" data-select="${i}" ${p.selected?'checked':''}>Photo ${i+1}</label></div></div>`).join('');
-    grid.onclick = e => { const remove = e.target.closest('[data-remove]'); if (remove) { const p = photos.splice(Number(remove.dataset.remove),1)[0]; URL.revokeObjectURL(p.url); renderPhotos(); } };
-    grid.oninput = e => { if (e.target.dataset.select !== undefined) photos[Number(e.target.dataset.select)].selected = e.target.checked; };
+    grid.innerHTML = photos.map((p,i)=>`<div class="ih-photo-tile"><img src="${p.url}" alt="Selected reference photo ${i+1}"><button type="button" class="ih-remove" data-remove="${i}" aria-label="Remove photo ${i+1}">×</button><div class="ih-photo-meta"><label><input type="checkbox" data-select="${i}" ${p.selected?'checked':''}>Photo ${i+1}</label>${$('#ihRequestForm')?.dataset.buyer==='true'?`<small class="ih-photo-source">${p.source==='listing_import'?'From listing':'Added by you'}</small>`:''}</div></div>`).join('');
+    grid.onclick = e => { if($('#ihRequestForm')?.dataset.buyer==='true'&&(buyerAttempt||buyerCreating))return;const remove = e.target.closest('[data-remove]'); if (remove) { notePhotoEdit();const p = photos.splice(Number(remove.dataset.remove),1)[0];if(p)URL.revokeObjectURL(p.url); renderPhotos(); } };
+    grid.oninput = e => { if($('#ihRequestForm')?.dataset.buyer==='true'&&(buyerAttempt||buyerCreating))return;if (e.target.dataset.select !== undefined) {notePhotoEdit();const photo=photos[Number(e.target.dataset.select)];if(photo)photo.selected=e.target.checked;} };
   }
   async function createRequest(e) {
     e.preventDefault();
     const buyer=$('#ihRequestForm')?.dataset.buyer==='true',selected=(buyer&&buyerAttempt)?buyerAttempt.photos:photos.filter(p=>p.selected),button=$('#ihCreate'),route=routeNumber;
+    if(buyer&&buyerCreating)return;
     if(!selected.length){errorAt('#ihCreateError',Error('Select at least one photo to verify.'));return;}
+    if(selected.length>maxPhotos){errorAt('#ihCreateError',Error('Select up to four photos for one item check.'));return;}
     const listing=buyer?safeListingURL($('#ihListingURL')?.value):'';
     if(buyer&&!buyerAttempt&&capabilities&&!capabilities.buyer_requests){errorAt('#ihCreateError',Error('Buyer requests are not available on this server yet. No credit has been reserved. Please try again after the update.'));return;}
     if(buyer&&!buyerAttempt&&!listing){errorAt('#ihCreateError',Error('Enter a public listing link starting with https:// or http://.'));return;}
     if(buyer&&!buyerAttempt&&!$('#ihBuyerTitle')?.value.trim()){errorAt('#ihCreateError',Error('Add a title for this item.'));return;}
+    const imported=selected.filter(photo=>photo.source==='listing_import');
+    if(buyer&&!buyerAttempt&&imported.some(photo=>photo.listingURL!==listing||!photo.importToken||photo.importToken!==imported[0].importToken)){
+      errorAt('#ihCreateError',Error('These photos belong to another listing or an earlier import. Load this listing again or remove those photos before creating a request. No credit has been reserved.'));return;
+    }
+    const draft=buyer&&!buyerAttempt?{title:$('#ihBuyerTitle').value.trim(),listing_url:listing,capture_mode:$('#ihBuyerCaptureMode').value,...(imported.length?{import_token:imported[0].importToken,imported_photo_indices:selected.map(photo=>photo.source==='listing_import'?photo.importedIndex:null)}:{})}:null;
+    const creation=++buyerCreationNumber;
+    if(buyer){buyerCreating=true;cancelListingImport();lockBuyerAttempt();listingImportStatus('Your selected photos are fixed while this request is being created.');}
     button.disabled=true;button.textContent='Creating your link…';$('#ihCreateError').hidden=true;
     try {
       if(!buyer||!buyerAttempt)await window.LockXCredits?.ensureForVerification();
@@ -230,8 +319,8 @@
       let payload={title:'Photo verification',consent:true,auto_publish:true,publish_matched_photos:true};
       if(buyer){
         if(!buyerAttempt){
-          payload={...payload,title:$('#ihBuyerTitle').value.trim(),request_kind:'buyer',listing_url:listing,capture_mode:$('#ihBuyerCaptureMode').value,request_key:btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')};
-          buyerAttempt={payload,photos:selected.slice()};lockBuyerAttempt();
+          payload={...payload,...draft,request_kind:'buyer',request_key:btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')};
+          buyerAttempt={payload,photos:selected.map(photo=>({...photo}))};lockBuyerAttempt();
         }
         payload=buyerAttempt.payload;
       }
@@ -243,8 +332,8 @@
       if(route!==routeNumber)return;
       $('#ihCreated').innerHTML=linkBox(record)+`<details class="ih-result-details"><summary>Keep your private management link</summary>${managementBox(record)}</details>`;
       bindLinkButtons($('#ihCreated'));loadRequests();$('#ihCreated').scrollIntoView({behavior:'smooth',block:'nearest'});
-    } catch(error){if(route===routeNumber){if(buyer&&buyerAttempt&&[400,401,402,403,404,413,415,422,429].includes(error.status)){buyerAttempt=null;$('#ihRequestForm')?.querySelectorAll('input,select,[data-remove],[data-select],#ihChoosePhotos').forEach(input=>input.disabled=false);}errorAt('#ihCreateError',error);}}
-    finally {if(route===routeNumber){button.disabled=false;button.innerHTML=buyer?(buyerAttempt?'Retry this request →':'Create seller request <span>→</span>'):'Continue to verification <span>→</span>';}}
+    } catch(error){if(route===routeNumber){if(buyer&&buyerAttempt&&[400,401,402,403,404,413,415,422,429].includes(error.status))buyerAttempt=null;errorAt('#ihCreateError',error);}}
+    finally {if(creation===buyerCreationNumber)buyerCreating=false;if(route===routeNumber){if(buyer){if(!buyerAttempt)lockBuyerAttempt(false);listingImportStatus(buyerAttempt?'These photos are fixed for this request. Use Retry this request below.':'Your photos are kept. You can load listing photos again.');}button.disabled=false;button.innerHTML=buyer?(buyerAttempt?'Retry this request →':'Create seller request <span>→</span>'):'Continue to verification <span>→</span>';}}
   }
   function linkBox(record) {
     const link = appLink('capture/' + record.token);
@@ -755,6 +844,7 @@
   }
   function route() {
     if(publicEvidenceContainer){window.LockXEvidence?.unmount?.(publicEvidenceContainer);publicEvidenceContainer=null;}
+    cancelListingImport();buyerCreating=false;buyerCreationNumber++;
     routeNumber++;sellerResultNumber++;sellerResultRequest?.abort();sellerResultRequest=null;clearTimeout(poll);poll=null;closeSellerEvents();sellerEventsDisabled=false;if(photoPreparation)photoPreparation.cancelled=true;stopCapture();revokeReports();
     const buyerRoute=location.hash.match(/^#in-hand\/buy(?:\?(.*))?$/);
     const match=location.hash.match(/^#in-hand\/(capture|report|verify)\/([A-Za-z0-9_-]+)(?:\/([A-Za-z0-9_-]{43}))?$/), active=location.hash==='#in-hand'||!!match||!!buyerRoute;
@@ -767,7 +857,7 @@
   }
   document.addEventListener('click',e=>{const nav=e.target.closest('[data-page]');if(nav?.dataset.page==='in-hand'){if(location.hash==='#in-hand')route();else location.hash='in-hand';}else if(nav&&location.hash.startsWith('#in-hand'))location.hash=nav.dataset.page;});
   window.addEventListener('hashchange',route);
-  window.addEventListener('pagehide',()=>{if(publicEvidenceContainer){window.LockXEvidence?.unmount?.(publicEvidenceContainer);publicEvidenceContainer=null;}if(photoPreparation)photoPreparation.cancelled=true;clearTimeout(poll);sellerResultNumber++;sellerResultRequest?.abort();sellerResultRequest=null;closeSellerEvents();stopCapture();clearMarkedFiles();});
+  window.addEventListener('pagehide',()=>{cancelListingImport();if(publicEvidenceContainer){window.LockXEvidence?.unmount?.(publicEvidenceContainer);publicEvidenceContainer=null;}if(photoPreparation)photoPreparation.cancelled=true;clearTimeout(poll);sellerResultNumber++;sellerResultRequest?.abort();sellerResultRequest=null;closeSellerEvents();stopCapture();clearMarkedFiles();});
   window.addEventListener('pageshow',event=>{if(event.persisted)route();});
   window.addEventListener('beforeunload',e=>{if(capture?.recorder?.state==='recording'||capture?.finishing){e.preventDefault();e.returnValue='';}});
   document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelPendingCaptureStart();if(capture?.recorder?.state==='recording')captureFailed('The recording paused when this page left the screen. Keep the camera page open for the next attempt.');else if(capture&&!capture.finishing)captureFailed('Camera startup paused when this page left the screen. Keep this page open and try again.');}});

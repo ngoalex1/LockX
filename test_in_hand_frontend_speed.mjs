@@ -122,6 +122,7 @@ function resultHarness(){
     api:(path,options)=>{const request=deferred();requests.push({path,options,...request});return request.promise;},
     shell:html=>rendered.push(html),$:()=>null,eligiblePhotoIndices:()=>new Set(),publicationPhotoIndex:()=>0,
     photoResultCards:()=>'',qualityRetryReason:()=>null,esc:value=>String(value??''),notice:()=>'',scope:'scope',
+    savedSubmissions:new Map(),queueInfo:()=>null,queuePresentation:()=>null,queueKicker:()=>'',
     bindLinkButtons(){},bindMarkedDownloads(){},verifiedPhotoSet:()=>'',appLink:()=>'',watchSellerEvents(){},closeSellerEvents(){}});
   vm.runInContext('let routeNumber=1,poll=null,sellerResultNumber=0,sellerResultRequest=null,sellerData={media:[]},sellerEvents=null,browserAccess={records:{}},standalone={};const secretPattern=/^[A-Za-z0-9_-]{43}$/;'+between('  async function showSellerResult(','  function voiceEnabled()')+'globalThis.run=showSellerResult;globalThis.navigate=()=>routeNumber++;globalThis.setStream=()=>sellerEvents={};',context);
   return {context,timers,requests,rendered};

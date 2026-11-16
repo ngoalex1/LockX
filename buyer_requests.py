@@ -20,7 +20,7 @@ def schema(db):
 
 
 def listing_url(value):
-    """Validate a reference only. Never fetch arbitrary user-supplied URLs."""
+    """Canonicalize a reference; network access requires the separate pinned importer."""
     if not isinstance(value,str) or len(value) > 2000 or any(ord(c)<33 for c in value) or '\\' in value:
         raise HTTPException(422,"Paste a valid public listing link")
     try:

@@ -30,17 +30,21 @@ import httpx
 import numpy as np
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, field_validator
 from PIL import Image, ImageDraw, ImageFont
 from lost_found import MAX_IMAGE, clean_photo, limited
 import credit_wallet as credits
 import verification_queue as verification_queue
 import buyer_requests
 import public_evidence
+import listing_import
 from evidence_regions import EvidenceRegion, parse_region_candidates, validate_regions
 
 log = logging.getLogger("lockx.in_hand")
-MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 6, 60 * 1024 * 1024, 4
+MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 4, 60 * 1024 * 1024, 4
+# New uploads use four references. Previously accepted evidence keeps its full
+# six-photo validation ceiling through capture, queued analysis and publication.
+MAX_STORED_PHOTOS = 6
 SCAN_MIN_SECONDS, SCAN_MAX_SECONDS = 12, 90
 SCAN_MAX_CHUNK, SCAN_MAX_CHUNKS = 8 * 1024 * 1024, 180
 RESULT_STREAM_MAX_SECONDS, RESULT_STREAM_POLL_SECONDS = 180, .15
@@ -169,6 +173,18 @@ class Listing(BaseModel):
     request_kind: Literal["seller", "buyer"] = "seller"
     listing_url: str = Field(default="", max_length=2000)
     request_key: str = Field(default="", max_length=80)
+    import_token: str = Field(default="", max_length=16_000)
+    imported_photo_indices: list[StrictInt | None] = Field(default_factory=list, max_length=MAX_PHOTOS)
+
+
+class StoredListing(Listing):
+    photo_notes: list[str] = Field(default_factory=list, max_length=MAX_STORED_PHOTOS)
+    listing_import: dict | None = None
+
+
+class ListingImportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    url: str = Field(min_length=1, max_length=2000)
 
 
 class CaptureStart(BaseModel):
@@ -543,7 +559,7 @@ def prepare_scan(request_id):
             if not row or row["status"] != "waiting":
                 return
             refs = db.execute("SELECT content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid", (request_id,)).fetchall()
-        listing = Listing.model_validate_json(row["listing"])
+        listing = StoredListing.model_validate_json(row["listing"])
         content = [{"type":"input_text","text":row["listing"]}]
         for i,reference in enumerate(refs):
             content += [{"type":"input_text","text":f"Reference photo index {i}"},
@@ -676,7 +692,7 @@ def strict_vision_schema(schema, allowed_frame_indices=None, photo_count=None):
                 if indices is not None:
                     indices["items"]["enum"] = allowed
         if photo_count is not None:
-            if type(photo_count) is not int or not 1 <= photo_count <= MAX_PHOTOS:
+            if type(photo_count) is not int or not 1 <= photo_count <= MAX_STORED_PHOTOS:
                 raise ValueError("Invalid comparison reference count")
             for definition in result.get("$defs", {}).values():
                 index = definition.get("properties", {}).get("photo_index")
@@ -1489,7 +1505,7 @@ class ExportPreparation:
 def prepare_exports(row, refs, session):
     """Overlap JPEG+QR work with vision; release none until final approval."""
     if (json.loads(row["listing"]).get("auto_publish") is not True or not session
-            or not session["finished"] or not 1 <= len(refs) <= MAX_PHOTOS
+            or not session["finished"] or not 1 <= len(refs) <= MAX_STORED_PHOTOS
             or not _preparation_slots.acquire(blocking=False)):
         return None
     preparation = None
@@ -1962,7 +1978,13 @@ def create_router(authenticate):
         return {"visual_comparison_ready":visual_ready(),"max_photos":MAX_PHOTOS,"max_photo_mb":5,"max_video_mb":60,"minimum_stage_seconds":STAGE_SECONDS,"camera_only":True,
                 "continuous_scan":True,"min_capture_seconds":SCAN_MIN_SECONDS,"max_capture_seconds":SCAN_MAX_SECONDS,
                 "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10,"credits_required":credits.enabled(),
-                "buyer_requests":True,"shared_evidence":True,"grounded_evidence_regions":True}
+                "buyer_requests":True,"shared_evidence":True,"grounded_evidence_regions":True,"listing_photo_import":True}
+
+    @router.post("/listing-import")
+    async def import_listing_photos(data: ListingImportInput, request: Request):
+        limited("in-hand-listing-import:" + (request.client.host if request.client else "unknown"),60)
+        result = await listing_import.import_listing(data.url)
+        return JSONResponse(result, headers={"Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
 
     @router.post("/requests/{request_id}/publish",status_code=201)
     def publish(request_id: str, data: Publication, owner=Depends(access)):
@@ -2070,7 +2092,7 @@ def create_router(authenticate):
                 raise HTTPException(422, "Add an item name and permission to process the selected photos") from exc
             files = form.getlist("photos")
             if not 1 <= len(files) <= MAX_PHOTOS or any(not hasattr(f,"read") for f in files):
-                raise HTTPException(422, "Select 1–6 reference photos")
+                raise HTTPException(422, "Select 1–4 reference photos")
             if any(len(note) > 350 for note in listing.photo_notes):
                 raise HTTPException(422,"Keep each photo note under 350 characters")
             photos = [clean_photo(await f.read(MAX_IMAGE+1)) for f in files]
@@ -2082,11 +2104,18 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             if listing.request_kind=="buyer":
-                fingerprint=buyer_requests.fingerprint(listing.model_dump(),photos)
+                fingerprint_data = listing.model_dump(exclude={"import_token","imported_photo_indices"})
+                if listing.import_token or listing.imported_photo_indices:
+                    fingerprint_data.update(import_token=listing.import_token,imported_photo_indices=listing.imported_photo_indices)
+                fingerprint=buyer_requests.fingerprint(fingerprint_data,photos)
                 prior=buyer_requests.find_request(db,owner,listing.request_key,fingerprint)
                 if prior:
                     return view(db,owned(db,prior["request_id"],owner),True)
-            db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)", (request_id,owner,secrets.token_urlsafe(32),listing.model_dump_json(),created,created+86400,json.dumps(make_plan(listing,len(photos)))))
+            provenance = listing_import.validate_selection(listing.import_token,listing.imported_photo_indices,listing.listing_url,photos)
+            stored_listing = listing.model_dump(exclude={"import_token","imported_photo_indices"})
+            if provenance:
+                stored_listing["listing_import"] = provenance
+            db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)", (request_id,owner,secrets.token_urlsafe(32),json.dumps(stored_listing),created,created+86400,json.dumps(make_plan(listing,len(photos)))))
             db.execute("INSERT INTO ih_access_keys VALUES (?,?)",(request_id,access_digest(management_key)))
             credits.bind_check(db,request_id,owner)
             for i,photo in enumerate(photos):
@@ -2163,13 +2192,15 @@ def create_router(authenticate):
             prior = db.execute("SELECT r.id,r.token FROM ih_capture_retries c JOIN ih_requests r ON r.id=c.request_id WHERE c.parent_request_id=?",(row["id"],)).fetchone()
             if prior:
                 return {"id":prior["id"],"token":prior["token"],"capture_retry_reason":reason}
+            references = db.execute("SELECT mime,content,seconds,label FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
+            if len(references) > MAX_PHOTOS:
+                raise HTTPException(409,"Choose up to four reference photos for a fresh check")
             limited("in-hand-quality-retry:"+row["id"],3)
             request_id, child_token, now = str(uuid4()), secrets.token_urlsafe(32), time.time()
             # The capture token cannot edit listing claims, add replacement
             # references or obtain owner management credentials.
             db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)",
                        (request_id,row["owner_id"],child_token,row["listing"],now,now+86400,row["plan"]))
-            references = db.execute("SELECT mime,content,seconds,label FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
             for media in references:
                 store_media(db,request_id,"listing",media["mime"],media["content"],media["seconds"],media["label"])
             db.execute("INSERT INTO ih_capture_retries VALUES (?,?,?)",(row["id"],request_id,reason))
@@ -2232,7 +2263,7 @@ def create_router(authenticate):
             if row["status"] not in {"waiting","capturing"}:
                 raise HTTPException(409,"This inspection has already been submitted")
             limited("in-hand-start:"+row["id"],12)
-            listing = Listing.model_validate_json(row["listing"])
+            listing = StoredListing.model_validate_json(row["listing"])
             count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]
             prepared = db.execute("SELECT plan FROM ih_scan_plans WHERE request_id=?",(row["id"],)).fetchone()
             plan = json.loads(prepared[0]) if prepared else normalize_scan_plan(listing,count)
@@ -2263,7 +2294,7 @@ def create_router(authenticate):
             if row["status"] not in {"waiting","capturing"}:
                 raise HTTPException(409,"This inspection has already been submitted")
             limited("in-hand-start:"+row["id"],12)
-            listing = Listing.model_validate_json(row["listing"])
+            listing = StoredListing.model_validate_json(row["listing"])
             if listing.request_kind=="buyer" and not data.share_evidence:
                 raise HTTPException(422,"Agree to share the item recording and supporting frames, or decline this buyer request")
             count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]

@@ -56,7 +56,7 @@
 
   const markup = `
     <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
-      <section class="lx-buyer-entry lx-wrap" aria-labelledby="lxBuyerTitle"><div><p class="lx-eyebrow">For buyers · Any marketplace</p><h2 id="lxBuyerTitle">Buying? Ask for proof.</h2><p>A fresh item video. A photo-by-photo check. You share the request.</p></div><form id="lxBuyerRequestForm"><label for="lxBuyerListing">Public listing link</label><div class="lx-buyer-entry-fields"><input id="lxBuyerListing" type="url" name="listing" inputmode="url" autocomplete="url" placeholder="Paste a selling link…" required maxlength="2000"><button class="lx-button" type="submit">Ask seller for proof ${arrow}</button></div><small>1 credit · 50¢ · Seller records free · Add listing photos next</small></form></section>
+      <section class="lx-buyer-entry lx-wrap" aria-labelledby="lxBuyerTitle"><div><p class="lx-eyebrow">For buyers · Any marketplace</p><h2 id="lxBuyerTitle">Buying? Ask for proof.</h2><p>A fresh item video. A photo-by-photo check. You share the request.</p></div><form id="lxBuyerRequestForm"><label for="lxBuyerListing">Public listing link</label><div class="lx-buyer-entry-fields"><input id="lxBuyerListing" type="url" name="listing" inputmode="url" autocomplete="url" placeholder="Paste a selling link…" required maxlength="2000"><button class="lx-button" type="submit">Ask seller for proof ${arrow}</button></div><small>1 credit · 50¢ · Seller records free · Listing photos load next</small></form></section>
       <div class="lx-hero lx-wrap lx-compact-hero">
         <div class="lx-compact-intro">
           <p class="lx-eyebrow">LockX in-hand verification</p>

@@ -76,7 +76,7 @@
     const heroNote=$('.lx-hero-note');if(heroNote)heroNote.textContent='No app. No password. Just your photos and camera.';
     const accountFAQ=[...document.querySelectorAll('.lx-faq details')].find(el=>el.querySelector('summary')?.textContent.includes('app or an account'));
     if(accountFAQ){accountFAQ.querySelector('summary').innerHTML='Do I need an app or a password?<span aria-hidden="true">+</span>';accountFAQ.querySelector('p').textContent='No app or password is needed. Sign in with an email link to buy credits and recover your balance on another device. One credit covers one item verification.';}
-    const pill=$('.ih-pills span');if(pill)pill.textContent='No app. No password.';
+    const pill=$('.ih-pills span');if(pill&&!$('.ih-buyer-hero'))pill.textContent='No app. No password.';
     const nav = $('#lockxPublicHeader nav');
     if (nav && !$('#cwHeaderButton')) {
       const button=document.createElement('button'); button.id='cwHeaderButton';button.className='cw-wallet-button';button.type='button';button.dataset.creditWallet='';
@@ -85,7 +85,7 @@
     const faq=$('#lxQuestions');
     if (faq && !$('#lockxPricing')) {
       const section=document.createElement('section');section.id='lockxPricing';section.className='cw-pricing lx-wrap';section.setAttribute('aria-labelledby','cwPricingTitle');
-      section.innerHTML=`<div class="cw-pricing-heading"><p class="lx-eyebrow">A little credit. A little confidence.</p><h2 id="cwPricingTitle">Ready when you are.</h2><p>One credit. One item verification.<br>Buy once, use your credits whenever you need them.</p></div><div class="cw-packs">${pricingCards()}</div><p class="cw-pricing-note">No subscription. Credits never expire. One item check includes up to six photos and a 10-second video.</p><p class="cw-payment-note">PayPal · Apple Pay · Credit &amp; debit cards${config.google_pay_ready?' · Google Pay':''}</p>`;
+      section.innerHTML=`<div class="cw-pricing-heading"><p class="lx-eyebrow">A little credit. A little confidence.</p><h2 id="cwPricingTitle">Ready when you are.</h2><p>One credit. One item verification.<br>Buy once, use your credits whenever you need them.</p></div><div class="cw-packs">${pricingCards()}</div><p class="cw-pricing-note">No subscription. Credits never expire. One item check includes up to four photos and a 10-second video.</p><p class="cw-payment-note">PayPal · Apple Pay · Credit &amp; debit cards${config.google_pay_ready?' · Google Pay':''}</p>`;
       faq.before(section);
       const links=$('#lockxPublicHeader .lx-header-links');
       if (links&&!links.querySelector('[data-home-scroll="lockxPricing"]')) {

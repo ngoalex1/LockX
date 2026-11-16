@@ -1,6 +1,6 @@
 # LockX verification credits
 
-One item verification costs one credit, including up to six selected photos and one 10-second recording. The packs are $5/10 credits, $10/20 credits, and $20/40 credits. All packs cost 50 cents per verification. There is no subscription or automatic renewal. New $1/2-credit checkouts are retired; existing purchases and their refund records retain their original amounts and credits.
+One item verification costs one credit, including up to four selected photos and one 10-second recording. The packs are $5/10 credits, $10/20 credits, and $20/40 credits. All packs cost 50 cents per verification. There is no subscription or automatic renewal. New $1/2-credit checkouts are retired; existing purchases and their refund records retain their original amounts and credits.
 
 ## Implementation
 
