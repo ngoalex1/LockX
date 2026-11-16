@@ -56,6 +56,7 @@
 
   const markup = `
     <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
+      <section class="lx-buyer-entry lx-wrap" aria-labelledby="lxBuyerTitle"><div><p class="lx-eyebrow">For buyers · Any marketplace</p><h2 id="lxBuyerTitle">Buying? Ask for proof.</h2><p>A fresh item video. A photo-by-photo check. You share the request.</p></div><form id="lxBuyerRequestForm"><label for="lxBuyerListing">Public listing link</label><div class="lx-buyer-entry-fields"><input id="lxBuyerListing" type="url" name="listing" inputmode="url" autocomplete="url" placeholder="Paste a selling link…" required maxlength="2000"><button class="lx-button" type="submit">Ask seller for proof ${arrow}</button></div><small>1 credit · 50¢ · Seller records free · Add listing photos next</small></form></section>
       <div class="lx-hero lx-wrap lx-compact-hero">
         <div class="lx-compact-intro">
           <p class="lx-eyebrow">LockX in-hand verification</p>
@@ -115,6 +116,14 @@
     }
   }
 
+  document.addEventListener('submit', event => {
+    if(event.target.id!=='lxBuyerRequestForm')return;event.preventDefault();
+    const field=document.getElementById('lxBuyerListing');
+    let listing;try{listing=new URL(field.value.trim());}catch{field.setCustomValidity('Enter a listing link starting with https:// or http://.');field.reportValidity();return;}
+    if(!['https:','http:'].includes(listing.protocol)||listing.username||listing.password){field.setCustomValidity('Use a public http:// or https:// listing link without sign-in details.');field.reportValidity();return;}
+    field.setCustomValidity('');location.hash='in-hand/buy?listing='+encodeURIComponent(listing.href);
+  });
+  document.addEventListener('input',event=>{if(event.target.id==='lxBuyerListing')event.target.setCustomValidity('');});
   document.addEventListener('click', event => {
     const control = event.target.closest('[data-home-scroll]');
     if (control) { event.preventDefault(); scrollToSection(control.dataset.homeScroll); }

@@ -1,0 +1,33 @@
+/* Buyer requests keep the selected warm LockX visual language. */
+body.lockx-public #landing.lx-home{scroll-margin-top:80px}
+body.lockx-public .lx-home .lx-buyer-entry{width:min(760px,calc(100% - 48px));margin:24px auto 0;padding:24px 28px;border:1px solid var(--lx-line,#e6d7d0);border-radius:18px;background:var(--lx-white,#fffdf9);text-align:left;box-shadow:0 8px 28px #75434105}
+body.lockx-public .lx-home .lx-buyer-entry .lx-eyebrow{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--lx-action,#9d6268);margin:0 0 7px}
+body.lockx-public .lx-home .lx-buyer-entry h2{font:400 28px/1.15 Georgia,"Times New Roman",serif;letter-spacing:-.6px;margin:0 0 8px;color:var(--lx-ink,#3d3032)}
+body.lockx-public .lx-home .lx-buyer-entry p:not(.lx-eyebrow){font-size:13px;line-height:1.5;color:var(--lx-muted,#79686b);margin:0 0 18px}
+.lx-buyer-entry label{display:block;font-size:11px;font-weight:600;color:var(--lx-ink,#3d3032);margin-bottom:8px}
+.lx-buyer-entry-fields{display:flex;gap:10px;align-items:stretch}
+.lx-buyer-entry input{display:block;flex:1;min-width:0;min-height:48px;border:1px solid var(--lx-line,#e6d7d0);background:#fff;border-radius:9px;padding:12px 14px;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--lx-ink,#3d3032)}
+body.lockx-public .lx-home .lx-buyer-entry .lx-button{min-height:48px;min-width:0;white-space:nowrap;border-radius:9px;font-size:13px;padding:12px 16px;background:var(--lx-action,#9d6268)}
+.lx-buyer-entry small{display:block;font-size:11px;line-height:1.6;color:var(--lx-muted,#79686b);margin-top:11px}
+.lx-buyer-entry input:focus-visible,.ih-buyer-form :focus-visible,.ih-buyer-request :focus-visible,.ih-share-evidence :focus-visible{outline:3px solid #a96970;outline-offset:3px}
+.ih-buyer-hero .ih-kicker{display:block;margin-top:18px}
+.ih-buyer-hero .ih-lead{max-width:620px}
+.ih-buyer-form label small{display:block;margin-top:7px;font-weight:400;line-height:1.6}
+.ih-buyer-form label>small{display:inline}
+.ih-buyer-form .ih-form-footer small{max-width:280px}
+.ih-buyer-form input:disabled,.ih-buyer-form select:disabled{opacity:.8;color:#655458;background:#faf5f1}
+.ih-buyer-request{border-color:#dac4bf;background:#fffdf9}
+.ih-buyer-request h2{margin-top:12px}
+.ih-buyer-request>p{font-size:13px;color:#78696d}
+.ih-buyer-source{display:inline-flex;align-items:center;min-height:44px;color:#975b63;font-size:13px;font-weight:600;overflow-wrap:anywhere;max-width:100%;margin-bottom:10px}
+.ih-page .ih-buyer-message-label{margin:12px 0 16px;font-size:12px}
+.ih-page .ih-buyer-message-label textarea{font:13px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;min-height:220px;resize:vertical;margin-top:9px;color:#55464a;border-color:#e1d3cd}
+.ih-buyer-request .ih-buyer-expiry,.ih-buyer-request .ih-buyer-credit-note{font-size:11px;line-height:1.7;margin-bottom:0}
+.ih-buyer-credit-note{padding-top:13px;margin-top:14px;border-top:1px solid #eaded7}
+#ihServiceState:not([hidden]){margin-bottom:22px}
+.ih-share-evidence{padding:15px;border:1px solid #dcc6c1;border-radius:10px;background:#fffaf5}
+.ih-share-evidence strong,.ih-share-evidence small{display:block;margin-top:6px;font-size:11px;line-height:1.6}
+.ih-share-evidence input{min-width:20px;min-height:20px}
+.ih-buyer-request .ih-button,#ihDeclineBuyerRequest{min-height:44px}
+@media(max-width:600px){body.lockx-public .lx-home .lx-buyer-entry{width:calc(100% - 34px);padding:21px 19px;margin-top:18px;border-radius:14px}body.lockx-public .lx-home .lx-buyer-entry h2{font-size:27px}.lx-buyer-entry-fields{flex-direction:column;gap:9px}.lx-buyer-entry input{font-size:16px;min-height:48px;width:100%}.lx-buyer-entry-fields .lx-button{width:100%}.lx-buyer-entry small{font-size:10px}.ih-buyer-request .ih-link-actions{display:grid;grid-template-columns:1fr}.ih-buyer-request .ih-link-actions .ih-button{width:100%}.ih-buyer-request .ih-buyer-expiry{margin-top:15px}.ih-buyer-message-label textarea{min-height:250px}.ih-page .ih-buyer-hero h1{font-size:36px}.ih-buyer-form label small{font-size:11px}}
+@media(max-width:360px){body.lockx-public .lx-home .lx-buyer-entry{padding:19px 16px}body.lockx-public .lx-home .lx-buyer-entry h2{font-size:25px}.ih-buyer-form .ih-pills{gap:6px}.ih-buyer-request .ih-kicker{font-size:9px;letter-spacing:1px}}

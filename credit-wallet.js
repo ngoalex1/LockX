@@ -72,7 +72,7 @@
     </article>`).join('');
   }
   function decorate() {
-    if (!active()) return;
+    if (!active() || !config) return;
     const heroNote=$('.lx-hero-note');if(heroNote)heroNote.textContent='No app. No password. Just your photos and camera.';
     const accountFAQ=[...document.querySelectorAll('.lx-faq details')].find(el=>el.querySelector('summary')?.textContent.includes('app or an account'));
     if(accountFAQ){accountFAQ.querySelector('summary').innerHTML='Do I need an app or a password?<span aria-hidden="true">+</span>';accountFAQ.querySelector('p').textContent='No app or password is needed. Sign in with an email link to buy credits and recover your balance on another device. One credit covers one item verification.';}
@@ -110,7 +110,7 @@
     const header=$('#cwHeaderButton');if(header)header.textContent=label;
     document.querySelectorAll('.cw-wallet-suffix').forEach(el=>el.hidden=balance===null);
     const note=$('#ihRequestForm .ih-form-footer small');
-    if(note)note.textContent='1 credit covers this item check. A completed check uses a credit even if no match is found.';
+    if(note)note.textContent=$('#ihRequestForm')?.dataset.buyer==='true'?'1 credit (50¢) is reserved when you create the request. It is returned if declined, cancelled, or expired before submission.':'1 credit covers this item check. A completed check uses a credit even if no match is found.';
   }
   function adoptSession(current) {
     const owner=current?.user?.id||null;
