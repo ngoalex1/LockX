@@ -12,6 +12,7 @@ const managementKey = 'k'.repeat(43);
 const record = (state='pending',extra={}) => ({id:'buyer-record',title:'Listing camera',status:state==='pending'?'waiting':'processing',token:'seller-capture-token',manage_key:managementKey,media:[],auto_publish:true,analysis_status:'pending',buyer_request:{state,listing_url:'https://market.example/items/123',buyer_funded:true,credit_reserved:true,expires:1795000000},...extra});
 const listingURL='https://market.example/items/123';
 const importResult=(url=listingURL,extra={})=>({status:'ready',listing_url:url,title:'Imported camera',imported_at:1795000000,expires:1795003600,import_token:'signed-import-snapshot',max_photos:4,photos:Array.from({length:4},(_,index)=>({index,mime:'image/jpeg',data_url:'data:image/jpeg;base64,'+Buffer.from([255,216,index,255,217]).toString('base64')})),...extra});
+const emailDraft=(extra={})=>({contacts:[{email:'seller@market.example',label:'Listing seller',source:'Public listing'}],contact_url:null,recipient:'seller@market.example',subject:'Please verify the listing camera',body:'Hello seller,\n\nRecord here: https://lockx.example/#in-hand/capture/seller-capture-token\nListing: '+listingURL,draft_digest:'signed-email-draft',send_ready:true,status:'draft',...extra});
 const manualPhoto=()=>{const blob=new Blob(['manual bytes'],{type:'image/jpeg'});return {blob,url:URL.createObjectURL(blob),selected:true,source:'manual'};};
 const runTimer=async(h,ms)=>{const entry=[...h.timers].find(([,timer])=>timer.ms===ms);assert.ok(entry,`Timer ${ms} exists`);h.timers.delete(entry[0]);await entry[1].fn();await flush();};
 class FormDataFake {
@@ -22,9 +23,14 @@ class FormDataFake {
 function harness(options={}) {
   const nodes=new Map(),requests=[],timers=new Map(),events={},calls={ensure:0,refresh:0,camera:0,recording:0,clipboard:[],shares:[]};let timer=0;
   class Element {
-    constructor(){this._html='';this.htmlWrites=0;this.textContent='';this.hidden=false;this.isConnected=true;this.dataset={};this.style={};this.checked=false;this.disabled=false;this.value='';this.classList={add(){},remove(){},toggle(){}};}
+    constructor(){this._html='';this.htmlWrites=0;this.textContent='';this.hidden=false;this.isConnected=true;this.dataset={};this.style={};this.checked=false;this.disabled=false;this.value='';this.attributes={};this.classList={add(){},remove(){},toggle(){}};}
     get innerHTML(){return this._html;}
     set innerHTML(html){this._html=html;this.htmlWrites++;
+      const decode=value=>value.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+      for(const id of ['ihSellerEmailRecipient','ihSellerEmailSubject','ihSendSellerEmail','ihOpenSellerEmail']){
+        const tag=html.match(new RegExp('<[^>]+id="'+id+'"[^>]*>'))?.[0],node=nodes.get('#'+id);
+        if(tag&&node){node.value=decode(tag.match(/value="([^"]*)"/)?.[1]||'');node.disabled=/\sdisabled(?:\s|>)/.test(tag);node.attributes={};const href=tag.match(/href="([^"]*)"/)?.[1];if(href)node.attributes.href=decode(href);}
+      }
       if(this.id==='in-hand'&&html.includes('id="ihRequestForm"')){
         nodes.get('#ihRequestForm').dataset.buyer=html.includes('data-buyer="true"')?'true':'false';
         nodes.get('#ihListingURL').value=html.match(/id="ihListingURL"[^>]*value="([^"]*)"/)?.[1]||'';
@@ -33,7 +39,8 @@ function harness(options={}) {
     }
     append(node){if(node.id==='in-hand')nodes.set('#in-hand',node);}
     prepend(){}
-    setAttribute(){}
+    setAttribute(name,value){this.attributes[name]=value;}
+    removeAttribute(name){delete this.attributes[name];}
     insertAdjacentHTML(){}
     addEventListener(){}
     scrollIntoView(){}
@@ -44,16 +51,16 @@ function harness(options={}) {
     querySelector(selector){return nodes.get(selector)||null;}
     querySelectorAll(selector){return selector==='input,select,[data-remove],[data-select],#ihChoosePhotos,#ihLoadListingPhotos'?['#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihChoosePhotos','#ihLoadListingPhotos'].map(id=>nodes.get(id)):[];}
   }
-  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerActionError','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
+  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
   nodes.get('#ihRequestForm').dataset.buyer='true';nodes.get('#ihBuyerCaptureMode').value='handheld';nodes.get('#ihBuyerTitle').value='Listing camera';nodes.get('#ihListingURL').value='https://market.example/items/123';
   const document={body:new Element(),hidden:false,readyState:'loading',querySelector:selector=>nodes.get(selector)||null,querySelectorAll:()=>[],createElement:()=>new Element(),addEventListener(){}};
   const stream={getTracks:()=>[{stop(){}}],getVideoTracks:()=>[{stop(){}}]};
   class Recorder {static isTypeSupported(){return true;}constructor(){this.state='inactive';}start(){this.state='recording';calls.recording++;}}
-  const window={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:{stopRecorder(){}},innerHeight:800,innerWidth:400,speechSynthesis:{},matchMedia:()=>({matches:true}),scrollTo(){},addEventListener:(name,fn)=>events[name]=fn,LockXCredits:{authorization:async()=> 'Bearer fake-owner',ensureForVerification:async()=>{calls.ensure++;await options.ensure?.();},refresh:()=>{calls.refresh++;},decorate(){}}};
+  const window={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:{stopRecorder(){}},innerHeight:800,innerWidth:400,speechSynthesis:{},matchMedia:()=>({matches:true}),scrollTo(){},addEventListener:(name,fn)=>events[name]=fn,LockXCredits:{authorization:async()=>options.noAuthorization?'':'Bearer fake-owner',ensureForVerification:async()=>{calls.ensure++;await options.ensure?.();},refresh:()=>{calls.refresh++;},decorate(){}}};
   const navigator={userAgent:'iPhone',clipboard:{writeText:async text=>{if(options.clipboardFail)throw Error('Clipboard unavailable');calls.clipboard.push(text);}},mediaDevices:{getUserMedia:async()=>{calls.camera++;return stream;}}};
   if(options.share)navigator.share=async data=>{calls.shares.push(data);if(options.shareFail)throw Error('Share unavailable');};
   const context={window,document,navigator,API_BASE:'https://api.example/v1',location:{hash:'#other',origin:'https://lockx.example',pathname:'/'},URL,URLSearchParams,Headers,Blob,Uint8Array,atob,FormData:FormDataFake,AbortController,Date,Intl,JSON,Promise,Map,Set,Number,Math,Error,crypto:webcrypto,MediaRecorder:Recorder,performance:{now:()=>100},btoa:value=>Buffer.from(value,'binary').toString('base64'),localStorage:{getItem:()=>null,setItem(){}},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id),setInterval:()=>999,clearInterval(){},go(){},toast(){},fetch:async(url,init={})=>{requests.push({url,init});if(url.endsWith('/capabilities'))return response({visual_comparison_ready:true,buyer_requests:true,listing_photo_import:true});return options.fetch?options.fetch(url,init):response(record());}};
-  let code=source.replace(/\}\)\(\);\s*$/,`window.testBuyer={page,showBuyer,loadListingPhotos,scheduleListingImport,addPhotos,renderPhotos,createRequest,buyerMessage,buyerRequestBox,bindBuyerRequest,copyBuyerMessage,safeListingURL,sourceLink,reportFingerprint,pollReport,showReport,showSeller,showPublic,startCapture,route,setCapabilities(value){capabilities=value;},setPhotos(value){photos=value;},getPhotos(){return photos;},getAttempt(){return buyerAttempt;},setCompressor(fn){compressPhoto=fn;},setRoute(value){routeNumber=value;},setupCapture(record){document.querySelector('#ihSellerConsent').checked=true;sellerData=record;sellerToken='capture-token';routeNumber=1;isStandalone=true;location.hash='#in-hand/capture/capture-token';browserAccess.records[record.id]='${managementKey}';prepareCaptureLocation=async()=>false;renderCamera=()=>{document.querySelector('#ihShareEvidence').checked=false;};positionReticle=()=>{};requestCaptureLocation=()=>{};renderUploadStatus=()=>{};updateCameraFeedback=()=>{};pumpChunks=()=>{};speak=()=>{};}};})();`);
+  let code=source.replace(/\}\)\(\);\s*$/,`window.testBuyer={page,showBuyer,loadListingPhotos,scheduleListingImport,addPhotos,renderPhotos,createRequest,buyerMessage,buyerRequestBox,bindBuyerRequest,copyBuyerMessage,safeListingURL,sourceLink,reportFingerprint,pollReport,showReport,showSeller,showPublic,startCapture,route,loadSellerEmail,sellerEmailState,preparedEmailURL,safeSellerEmail,setManagementKey(value){managementKey=value;},setCapabilities(value){capabilities=value;},setPhotos(value){photos=value;},getPhotos(){return photos;},getAttempt(){return buyerAttempt;},setCompressor(fn){compressPhoto=fn;},setRoute(value){routeNumber=value;},setupCapture(record){document.querySelector('#ihSellerConsent').checked=true;sellerData=record;sellerToken='capture-token';routeNumber=1;isStandalone=true;location.hash='#in-hand/capture/capture-token';browserAccess.records[record.id]='${managementKey}';prepareCaptureLocation=async()=>false;renderCamera=()=>{document.querySelector('#ihShareEvidence').checked=false;};positionReticle=()=>{};requestCaptureLocation=()=>{};renderUploadStatus=()=>{};updateCameraFeedback=()=>{};pumpChunks=()=>{};speak=()=>{};}};})();`);
   vm.createContext(context);vm.runInContext(code,context);
   return {api:window.testBuyer,nodes,requests,timers,calls,context,events};
 }
@@ -81,9 +88,9 @@ test('old-server capability and unsafe listing URL fail before any credit reserv
   h.api.setCapabilities({buyer_requests:true});h.nodes.get('#ihListingURL').value='javascript:alert(1)';await h.api.createRequest({preventDefault(){}});assert.equal(h.calls.ensure,0);assert.equal(h.api.safeListingURL('https://user:password@market.example/item'),'');assert.equal(h.api.sourceLink({listing_url:'javascript:alert(1)'}),'');
 });
 
-test('seller invitation contains only the capture and original listing links, with honest manual-share copy',()=>{
+test('seller invitation keeps email first and offers the same safe marketplace-share alternative',()=>{
   const h=harness({share:true}),r=record();const message=h.api.buyerMessage(r),html=h.api.buyerRequestBox(r);
-  assert.match(message,/#in-hand\/capture\/seller-capture-token/);assert.match(message,/https:\/\/market.example\/items\/123/);assert.doesNotMatch(message,/report\/|kkkkk|manage/i);assert.match(html,/You send it yourself; LockX does not contact/);assert.doesNotMatch(html,/request sent|message sent/i);assert.match(html,/Copy message/);assert.match(html,/Share message/);assert.match(html,/Cancel request/);assert.match(html,/noopener noreferrer/);
+  assert.match(message,/#in-hand\/capture\/seller-capture-token/);assert.match(message,/https:\/\/market.example\/items\/123/);assert.doesNotMatch(message,/report\/|kkkkk|manage/i);assert.match(html,/Copy or share this message yourself/);assert.ok(html.indexOf('ihSellerEmail')<html.indexOf('ihCopyBuyerMessage'));assert.doesNotMatch(html,/request sent|message sent/i);assert.match(html,/Copy message/);assert.match(html,/Share message/);assert.match(html,/Cancel request/);assert.match(html,/noopener noreferrer/);
 });
 
 test('native sharing failure falls back to copying the same seller message',async()=>{
@@ -247,4 +254,83 @@ test('malformed, duplicate, and oversized listing photo sets cannot partially re
   for(const photos of [[...valid.photos,valid.photos[0]],[valid.photos[0],valid.photos[0]],[valid.photos[0],{index:1,mime:'image/jpeg',data_url:'https://bad.example/image.jpg'}]]){
     const h=harness({fetch:async()=>response(importResult(listingURL,{photos}))});await flush();const original=manualPhoto();h.api.setPhotos([original]);await h.api.loadListingPhotos();assert.equal(h.api.getPhotos()[0],original);assert.equal(h.nodes.get('#ihLoadListingPhotos').disabled,false);assert.equal(h.calls.ensure,0);
   }
+});
+
+test('private pending report prepares one email draft without sending, and polling preserves recipient edits',async()=>{
+  const r=record(),h=harness({fetch:async url=>response(url.endsWith('/seller-email')?emailDraft():r)});await flush();h.api.setManagementKey(managementKey);h.api.setRoute(1);
+  await h.api.showReport(r.id,1,r);await flush();
+  assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,1);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
+  const draftRequest=h.requests.find(request=>request.url.endsWith('/seller-email'));assert.equal(draftRequest.init.headers.get('X-LockX-Manage-Key'),managementKey);
+  assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'seller@market.example');assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);
+  assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/id="ihSellerEmailSubject"[^>]*readonly/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/id="ihSellerEmailBody"[^>]*readonly/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/no extra charge/);
+  h.nodes.get('#ihSellerEmailRecipient').value='reviewed@market.example';h.nodes.get('#ihSellerEmailRecipient').oninput();
+  await h.api.showReport(r.id,1,{...r,status:'capturing'});await flush();
+  assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'reviewed@market.example');assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,1);
+  assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);
+});
+
+test('seller email send is an explicit click, uses buyer Bearer despite management authority, and reports provider acceptance',async()=>{
+  const h=harness({fetch:async(_url,init)=>response(emailDraft(init.method==='POST'?{status:'accepted',sent_to:'reviewed@market.example',send_ready:false,recipient_locked:true}:{}))});await flush();h.api.setManagementKey(managementKey);await h.api.loadSellerEmail(record(),1);
+  h.nodes.get('#ihSellerEmailRecipient').value='reviewed@market.example';h.nodes.get('#ihSellerEmailRecipient').oninput();
+  assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
+  await h.nodes.get('#ihSendSellerEmail').onclick();const sent=h.requests.find(request=>request.init.method==='POST');
+  assert.equal(sent.init.headers.get('Authorization'),'Bearer fake-owner');assert.deepEqual(JSON.parse(sent.init.body),{recipient:'reviewed@market.example',draft_digest:'signed-email-draft',consent:true});
+  assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Email accepted for sending/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/does not confirm delivery/);assert.doesNotMatch(h.nodes.get('#ihSellerEmail').innerHTML,/Email delivered|Open prepared email|mailto:/);
+  assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);
+});
+
+test('simultaneous send clicks submit once and an uncertain retry keeps the exact recipient and draft',async()=>{
+  let finish,count=0;const h=harness({fetch:async(_url,init)=>{if(init.method!=='POST')return response(emailDraft());if(++count===1)return new Promise((_resolve,reject)=>finish=()=>reject(Error('Connection lost')));return response(emailDraft({status:'accepted',sent_to:'seller@market.example'}));}});await flush();await h.api.loadSellerEmail(record(),1);
+  const first=h.nodes.get('#ihSendSellerEmail').onclick();await flush();assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);await h.nodes.get('#ihSendSellerEmail').onclick();assert.equal(count,1);
+  finish();await first;assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/send result is not confirmed/);assert.equal(h.nodes.get('#ihSellerEmailRecipient').disabled,true);
+  h.nodes.get('#ihSellerEmailRecipient').value='changed@market.example';h.nodes.get('#ihSellerEmailRecipient').oninput();await h.nodes.get('#ihSendSellerEmail').onclick();
+  const sends=h.requests.filter(request=>request.init.method==='POST');assert.equal(sends.length,2);assert.equal(sends[0].init.body,sends[1].init.body);assert.equal(h.calls.ensure,0);assert.ok(sends.every(request=>request.url.endsWith('/seller-email')));
+});
+
+test('ambiguous contacts require an explicit choice, and manual recipient validation blocks header injection',async()=>{
+  const h=harness({fetch:async()=>response(emailDraft({contacts:[{email:'sales@market.example',label:'Sales'},{email:'support@market.example',label:'Support'}],recipient:'sales@market.example'}))});await flush();await h.api.loadSellerEmail(record(),1);
+  assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'');assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/more than one email contact/);
+  h.nodes.get('#ihSellerEmailContact').value='sales@market.example';h.nodes.get('#ihSellerEmailContact').onchange();assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'sales@market.example');assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);
+  for(const invalid of ['seller@market.example\r\nBcc:other@market.example','one@market.example,two@market.example','Name <seller@market.example>']){h.nodes.get('#ihSellerEmailRecipient').value=invalid;h.nodes.get('#ihSellerEmailRecipient').oninput();assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);assert.equal(h.api.safeSellerEmail(invalid),'');}
+});
+
+test('mail-app fallback encodes the reviewed email and template, strips subject line breaks, and never claims to send',async()=>{
+  const h=harness({fetch:async()=>response(emailDraft({contacts:[],recipient:'',send_ready:false,contact_url:'https://market.example/seller/contact',subject:'Verify camera\r\nBcc: intruder@market.example',body:'Hi seller,\nItem? & details #1'}))});await flush();await h.api.loadSellerEmail(record(),1);
+  assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/No seller email was found/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Open seller contact page/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Open prepared email/);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/opening it does not send/);
+  assert.equal(h.api.preparedEmailURL(h.api.sellerEmailState(record())),'');h.nodes.get('#ihSellerEmailRecipient').value='manual@market.example';h.nodes.get('#ihSellerEmailRecipient').oninput();
+  const url=h.nodes.get('#ihOpenSellerEmail').attributes.href;assert.ok(url.startsWith('mailto:manual%40market.example?subject='));assert.ok(url.includes('body=Hi%20seller%2C%0D%0AItem%3F%20%26%20details%20%231'));assert.ok(!url.split('&body=')[0].includes('%0D'));assert.equal((url.match(/&/g)||[]).length,1);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
+});
+
+test('draft preparation failure keeps copy/share available and retries only when clicked',async()=>{
+  let count=0;const h=harness({fetch:async()=>{if(++count===1)throw Error('Offline');return response(emailDraft());}});await flush();await h.api.loadSellerEmail(record(),1);
+  assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Offline/);assert.match(h.api.buyerRequestBox(record()),/Copy message/);await h.api.loadSellerEmail(record(),1);assert.equal(count,1);
+  await h.nodes.get('#ihRetrySellerEmailDraft').onclick();await flush();assert.equal(count,2);assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'seller@market.example');
+});
+
+test('sending requires the buyer account and leaves the prepared email intact when signed out',async()=>{
+  const h=harness({noAuthorization:true,fetch:async()=>response(emailDraft())});await flush();await h.api.loadSellerEmail(record(),1);await h.nodes.get('#ihSendSellerEmail').onclick();assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Sign in to the buyer account/);assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'seller@market.example');assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);
+});
+
+test('reloaded uncertain emails retain their frozen recipient even when the listing has no contacts',async()=>{
+  const h=harness({fetch:async(_url,init)=>response(emailDraft({contacts:[],recipient:'original@market.example',recipient_locked:true,status:init.method==='POST'?'accepted':'uncertain',sent_to:init.method==='POST'?'original@market.example':null}))});await flush();await h.api.loadSellerEmail(record(),1);assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'original@market.example');assert.equal(h.nodes.get('#ihSellerEmailRecipient').disabled,true);await h.nodes.get('#ihSendSellerEmail').onclick();assert.deepEqual(JSON.parse(h.requests.find(request=>request.init.method==='POST').init.body),{recipient:'original@market.example',draft_digest:'signed-email-draft',consent:true});
+});
+
+test('late email draft loads update only the currently displayed request and are reusable after route return',async()=>{
+  let finish;const h=harness({fetch:()=>new Promise(resolve=>finish=resolve)});await flush();h.api.setRoute(1);const first=h.api.loadSellerEmail(record(),1);h.api.setRoute(2);await h.api.loadSellerEmail(record(),2);finish(response(emailDraft()));await first;assert.equal(h.nodes.get('#ihSellerEmailRecipient').value,'seller@market.example');assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,1);
+});
+
+test('contact provenance survives manual photos or unavailable photo imports, and never crosses listing URLs',async()=>{
+  for(const unavailable of [false,true]){
+    const h=harness({fetch:async url=>response(url.endsWith('/listing-import')?importResult(listingURL,unavailable?{status:'unavailable',photos:[],import_token:'signed-contacts-only',seller_contact:{emails:[{email:'seller@market.example'}]}}:{}):record())});await flush();await h.api.loadListingPhotos();h.api.setPhotos([manualPhoto()]);await h.api.createRequest({preventDefault(){}});
+    const payload=JSON.parse(h.requests.find(request=>request.url.endsWith('/requests')).init.body.get('payload'));assert.equal(payload.contact_import_token,unavailable?'signed-contacts-only':'signed-import-snapshot');assert.equal(payload.import_token,undefined);
+  }
+  const h=harness({fetch:async url=>response(url.endsWith('/listing-import')?importResult():record())});await flush();await h.api.loadListingPhotos();h.api.setPhotos([manualPhoto()]);h.nodes.get('#ihListingURL').value='https://other.example/item';await h.api.createRequest({preventDefault(){}});const payload=JSON.parse(h.requests.find(request=>request.url.endsWith('/requests')).init.body.get('payload'));assert.equal(payload.contact_import_token,undefined);
+});
+
+test('attempted emails never offer a mail-app duplicate and a provider cooldown permits only the same retry',async()=>{
+  for(const status of ['accepted','sending','uncertain']){
+    const h=harness({fetch:async()=>response(emailDraft({status,recipient_locked:true,send_ready:false,message:'Check the seller conversation first.'}))});await flush();await h.api.loadSellerEmail(record(),1);assert.doesNotMatch(h.nodes.get('#ihSellerEmail').innerHTML,/Open prepared email|mailto:/);assert.equal(h.nodes.get('#ihSellerEmailRecipient').disabled,true);assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,status!=='sending');
+  }
+  const h=harness({fetch:async(_url,init)=>response(emailDraft({status:init.method==='POST'?'accepted':'draft',recipient_locked:true,send_ready:false,retry_after:init.method==='POST'?0:60}))});await flush();await h.api.loadSellerEmail(record(),1);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Retry available shortly/);assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
+  await runTimer(h,60000);assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);await h.nodes.get('#ihSendSellerEmail').onclick();assert.equal(h.requests.filter(request=>request.init.method==='POST').length,1);assert.equal(h.calls.ensure,0);
 });

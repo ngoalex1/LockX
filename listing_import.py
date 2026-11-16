@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from buyer_requests import listing_url
+from listing_contacts import empty_contact, extract_seller_contact, validate_contact
 from lost_found import clean_photo
 
 MAX_PHOTOS = 4
@@ -275,13 +276,12 @@ def _sign(payload):
     return body + '.' + signature
 
 
-def validate_selection(token, indices, url, photos, *, now=None):
-    """Bind uploaded, normalized bytes to the publicly fetched snapshot."""
-    if not token and not indices:
-        return None
-    message = 'The imported listing photos expired or changed. Import the listing again before creating a request. No credit was reserved.'
-    if not isinstance(token, str) or not 1 <= len(token) <= 16_000:
-        raise HTTPException(422, message)
+_INVALID_IMPORT = 'The imported listing photos or seller contact expired or changed. Import the listing again before creating a request. No credit was reserved.'
+
+
+def _decode_snapshot(token, url, *, now=None):
+    if not isinstance(token, str) or not 1 <= len(token) <= 32_000:
+        raise HTTPException(422, _INVALID_IMPORT)
     try:
         body, signature = token.rsplit('.', 1)
         if not hmac.compare_digest(signature, hmac.new(_signing_key, body.encode(), hashlib.sha256).hexdigest()):
@@ -289,9 +289,38 @@ def validate_selection(token, indices, url, photos, *, now=None):
         snapshot = json.loads(base64.urlsafe_b64decode(body + '=' * (-len(body) % 4)))
         timestamp = time.time() if now is None else now
         if (snapshot['version'] != 1 or snapshot['listing_url'] != normalize_url(url)
+                or type(snapshot['imported_at']) not in {int, float}
+                or type(snapshot['expires']) not in {int, float}
                 or not snapshot['imported_at'] <= timestamp < snapshot['expires']
                 or snapshot['expires'] - snapshot['imported_at'] != TOKEN_SECONDS
-                or not isinstance(indices, list) or len(indices) != len(photos)
+                or not isinstance(snapshot['photos'], list) or len(snapshot['photos']) > MAX_PHOTOS):
+            raise ValueError()
+        resolved = normalize_url(snapshot['resolved_url'])
+        snapshot['seller_contact'] = validate_contact(snapshot.get('seller_contact', empty_contact(now=snapshot['imported_at'])),
+                                                     resolved, snapshot['imported_at'])
+        return snapshot
+    except (ValueError, TypeError, KeyError, IndexError, UnicodeError, HTTPException):
+        raise HTTPException(422, _INVALID_IMPORT) from None
+
+
+def validate_import_snapshot(token, url, *, now=None):
+    """Verify contact provenance independently of any selected listing photos.
+
+    This return value is safe to store; the signing token is intentionally absent.
+    Photo provenance still requires validate_selection against uploaded bytes.
+    """
+    snapshot = _decode_snapshot(token, url, now=now)
+    return {'listing_url': snapshot['listing_url'], 'imported_at': snapshot['imported_at'],
+            'photos': [], 'seller_contact': snapshot['seller_contact']}
+
+
+def validate_selection(token, indices, url, photos, *, now=None):
+    """Bind uploaded, normalized bytes to the publicly fetched snapshot."""
+    if not token and not indices:
+        return None
+    snapshot = _decode_snapshot(token, url, now=now)
+    try:
+        if (not isinstance(indices, list) or len(indices) != len(photos)
                 or not 1 <= len(photos) <= MAX_PHOTOS):
             raise ValueError()
         selected, seen = [], set()
@@ -308,9 +337,10 @@ def validate_selection(token, indices, url, photos, *, now=None):
             seen.add(index)
         if not selected:
             raise ValueError()
-        return {'listing_url': snapshot['listing_url'], 'imported_at': snapshot['imported_at'], 'photos': selected}
+        return {'listing_url': snapshot['listing_url'], 'imported_at': snapshot['imported_at'],
+                'photos': selected, 'seller_contact': snapshot['seller_contact']}
     except (ValueError, TypeError, KeyError, IndexError, UnicodeError, HTTPException):
-        raise HTTPException(422, message) from None
+        raise HTTPException(422, _INVALID_IMPORT) from None
 
 
 async def import_listing(url):
@@ -319,10 +349,12 @@ async def import_listing(url):
         raise HTTPException(429, 'Listing imports are busy. Please try again shortly. No credit was used.', headers={'Retry-After': '5'})
     title, photos = '', []
     canonical = original
+    seller_contact = None
     try:
         async with asyncio.timeout(IMPORT_SECONDS):
             content, canonical, _ = await fetch_public(original, kind='html')
             title, candidates = parse_listing(content, canonical)
+            seller_contact = extract_seller_contact(content, canonical)
             seen = set()
             # At most two image downloads at once. Never retain more than four.
             for start in range(0, min(len(candidates), 8), 2):
@@ -356,14 +388,21 @@ async def import_listing(url):
     finally:
         _slots.release()
     now = time.time()
-    if not photos:
+    seller_contact = seller_contact or empty_contact(now=now)
+    seller_contact['detected_at'] = now
+    has_contact = bool(seller_contact['candidates'] or seller_contact['contact_url'])
+    if not photos and not has_contact:
         return {'status': 'unavailable', 'listing_url': original, 'title': title, 'imported_at': now,
-                'expires': now, 'import_token': '', 'photos': [], 'message': _UNAVAILABLE, 'max_photos': MAX_PHOTOS}
+                'expires': now, 'import_token': '', 'photos': [], 'seller_contact': seller_contact,
+                'message': _UNAVAILABLE, 'max_photos': MAX_PHOTOS}
     payload = {'version': 1, 'listing_url': original, 'resolved_url': canonical, 'title': title,
                'imported_at': now, 'expires': now+TOKEN_SECONDS,
+               'seller_contact': seller_contact,
                'photos': [{k:v for k,v in photo.items() if k != 'encoded'} for photo in photos]}
-    return {'status': 'ready', 'listing_url': original, 'title': title or 'Listing item',
+    return {'status': 'ready' if photos else 'unavailable', 'listing_url': original, 'title': title or 'Listing item',
             'imported_at': now, 'expires': now+TOKEN_SECONDS, 'import_token': _sign(payload),
+            'seller_contact': seller_contact,
             'photos': [{'index': index, 'mime': 'image/jpeg',
                         'data_url': 'data:image/jpeg;base64,'+base64.b64encode(photo['encoded']).decode()}
-                       for index,photo in enumerate(photos)], 'max_photos': MAX_PHOTOS}
+                       for index,photo in enumerate(photos)], 'max_photos': MAX_PHOTOS,
+            **({'message': _UNAVAILABLE} if not photos else {})}

@@ -1,0 +1,15 @@
+# Buyer-requested seller email
+
+LockX can prepare a seller invitation after a buyer creates a verification request. Importing a listing, selecting photos, creating a request, reading its report, and polling never send email. The buyer reviews the visible recipient, fixed subject and prepared message, then explicitly clicks **Send verification email**. Sending adds no credit charge.
+
+Contact detection uses only seller-associated visible mail links/contact fields or scoped structured seller metadata on the imported page. It excludes site support/footer contacts, hidden content, unrelated products and arbitrary page-wide email matches. Missing email stays blank; multiple candidates require a choice. Observed same-origin seller contact links and the marketplace copy/share message remain alternatives. No addresses or contact paths are guessed, no login is bypassed, and no extra pages are crawled.
+
+Seller contact provenance is included in the signed import snapshot and saved privately with the request. A contact-only snapshot also works when the buyer adds photos manually. Contact metadata and sending fields are omitted from AI comparison inputs and public proof manifests. The email contains only the selected listing's title/URL and the limited recording link; it excludes private management links, buyer credentials and buyer identity.
+
+Direct sending requires the authenticated buyer account that owns the still-waiting request. A private management key can read a draft but cannot send. The fixed message and recipient freeze on the first attempt. One stable provider idempotency key is retained for every retry; overlapping attempts have a durable lease, and late responses are fenced. Unconfirmed attempts can be retried explicitly with the same payload for at most 23 hours, inside the provider's 24-hour idempotency retention. Provider throttling adds a bounded cooldown. There are no automatic reminders or automatic email retries.
+
+A provider acceptance is shown as **Email submitted**, without claiming delivery or a seller response. Attempts are limited per buyer and recipient. No extra credit is consumed by email attempts. Once sending is attempted, the interface does not offer an email-app duplicate; the original state and recipient remain visible.
+
+The existing verified Resend domain can provide delivery through a sending-only domain-restricted credential. When direct delivery is unconfigured, an unattempted draft can open the buyer's email app for review and sending. Opening that app is never presented as successful delivery. Live activation does not itself send a seller message.
+
+Development checks use fake email adapters and fixture recipients. No real sellers, customer credits or live payments are used. Physical-device mail-app behavior and inbox delivery cannot be established by offline tests.

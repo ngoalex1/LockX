@@ -38,5 +38,21 @@ body.lockx-public .lx-home .lx-buyer-entry .lx-button{min-height:48px;min-width:
 .ih-share-evidence strong,.ih-share-evidence small{display:block;margin-top:6px;font-size:11px;line-height:1.6}
 .ih-share-evidence input{min-width:20px;min-height:20px}
 .ih-buyer-request .ih-button,#ihDeclineBuyerRequest{min-height:44px}
+.ih-seller-email{margin:16px 0 20px;padding:22px;border:1px solid #dcc0b9;border-radius:14px;background:#fff7f1}
+.ih-seller-email h3{margin:10px 0;font:400 28px/1.2 Georgia,"Times New Roman",serif;letter-spacing:-.4px;color:#49343a}
+.ih-seller-email>p{font-size:13px;line-height:1.7;color:#78666b;overflow-wrap:anywhere}
+.ih-page .ih-seller-email label{display:block;margin:16px 0 0;font-size:12px;color:#59454b}
+.ih-page .ih-seller-email input,.ih-page .ih-seller-email select,.ih-page .ih-seller-email textarea{display:block;box-sizing:border-box;width:100%;min-width:0;margin-top:7px;padding:12px 13px;border:1px solid #ddcbc3;border-radius:8px;background:#fffdfb;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#55464a}
+.ih-page .ih-seller-email textarea{min-height:238px;resize:vertical}
+.ih-page .ih-seller-email #ihSellerEmailSubject{min-height:0;resize:none}
+.ih-page .ih-seller-email input:disabled,.ih-page .ih-seller-email select:disabled{opacity:1;background:#f7eee8;color:#67555a}
+.ih-seller-email #ihSendSellerEmail,.ih-seller-email #ihOpenSellerEmail{display:flex;justify-content:center;align-items:center;width:100%;min-height:50px;margin-top:19px;box-sizing:border-box;font-size:14px;text-align:center}
+.ih-seller-email [aria-disabled="true"]{opacity:.55;cursor:default;pointer-events:none}
+.ih-seller-email .ih-seller-email-hint,.ih-seller-email .ih-seller-email-source{font-size:11px;line-height:1.7;margin-bottom:0}
+.ih-seller-contact-link{margin-top:16px;max-width:100%;box-sizing:border-box;white-space:normal;text-align:center}
+.ih-buyer-share-alternative{margin-bottom:12px;padding:15px 0;border-top:1px solid #eadbd4;border-bottom:1px solid #eadbd4}
+.ih-buyer-share-alternative summary{cursor:pointer;min-height:28px;font-size:13px;color:#86545c;font-weight:600}
+.ih-buyer-share-alternative>p{font-size:12px;color:#78696d}
+@media(max-width:600px){.ih-seller-email{padding:18px 15px;margin-top:15px;border-radius:11px}.ih-seller-email h3{font-size:26px}.ih-page .ih-seller-email input,.ih-page .ih-seller-email select,.ih-page .ih-seller-email textarea{font-size:16px}.ih-page .ih-seller-email #ihSellerEmailBody{min-height:280px}.ih-seller-contact-link{width:100%}}
 @media(max-width:600px){body.lockx-public .lx-home .lx-buyer-entry{width:calc(100% - 34px);padding:21px 19px;margin-top:18px;border-radius:14px}body.lockx-public .lx-home .lx-buyer-entry h2{font-size:27px}.lx-buyer-entry-fields{flex-direction:column;gap:9px}.lx-buyer-entry input{font-size:16px;min-height:48px;width:100%}.lx-buyer-entry-fields .lx-button{width:100%}.lx-buyer-entry small{font-size:10px}.ih-buyer-request .ih-link-actions{display:grid;grid-template-columns:1fr}.ih-buyer-request .ih-link-actions .ih-button{width:100%}.ih-buyer-request .ih-buyer-expiry{margin-top:15px}.ih-buyer-message-label textarea{min-height:250px}.ih-page .ih-buyer-hero h1{font-size:36px}.ih-buyer-form label small{font-size:11px}}
 @media(max-width:360px){body.lockx-public .lx-home .lx-buyer-entry{padding:19px 16px}body.lockx-public .lx-home .lx-buyer-entry h2{font-size:25px}.ih-buyer-form .ih-pills{gap:6px}.ih-buyer-request .ih-kicker{font-size:9px;letter-spacing:1px}}
