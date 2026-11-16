@@ -10,7 +10,7 @@ import time
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlencode, urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -149,6 +149,10 @@ def bind_quality_retry(db, parent_id, child_id):
 
 def reserve_check(db, request_id):
     schema(db)
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ih_buyer_requests'").fetchone():
+        invitation=db.execute("SELECT state FROM ih_buyer_requests WHERE request_id=?",(request_id,)).fetchone()
+        if invitation and invitation["state"]!="pending":
+            raise HTTPException(410,"This buyer request is no longer open")
     record = db.execute("SELECT * FROM credit_checks WHERE request_id=?", (request_id,)).fetchone()
     if not record:
         # Inspections created before the paid launch keep working.
@@ -179,7 +183,9 @@ def settle_check(db, request_id):
 
 def reconcile(db, owner):
     from in_hand import cleanup_scan_media
+    from buyer_requests import expire_pending
     cleanup_scan_media(db,time.time())
+    expire_pending(db,owner)
     rows = db.execute("""SELECT c.request_id FROM credit_checks c JOIN ih_requests r ON r.id=c.request_id
                          WHERE c.owner_id=? AND c.state='reserved'
                          AND r.analysis_status IN ('complete','failed','unavailable')""", (owner,)).fetchall()
@@ -288,6 +294,7 @@ class CheckoutCreate(BaseModel):
     pack_id: Literal["regular", "frequent", "bulk"]
     provider: Literal["paypal_link", "google_pay", "apple_pay"] = "paypal_link"
     request_key: str
+    marketing_visit_id: UUID | None = None
 
 
 class WalletCapture(BaseModel):
@@ -332,8 +339,6 @@ def create_router(authenticate):
             if prior:
                 if prior["pack_id"] != data.pack_id or prior["provider"] != data.provider:
                     raise HTTPException(409, "This checkout reference belongs to a different purchase")
-                if prior["resource_id"]:
-                    return checkout_view(prior)
                 checkout_id = prior["id"]
             else:
                 checkout_id = str(uuid4())
@@ -341,6 +346,11 @@ def create_router(authenticate):
                     (id,owner_id,pack_id,amount_cents,credits,provider,status,created,request_key)
                     VALUES (?,?,?,?,?,?,'creating',?,?)""", (checkout_id, owner, data.pack_id,
                     pack["amount_cents"], pack["credits"], data.provider, time.time(), data.request_key))
+            if data.marketing_visit_id:
+                from credit_social import attribute_checkout
+                attribute_checkout(db, checkout_id, str(data.marketing_visit_id))
+            if prior and prior["resource_id"]:
+                return checkout_view(prior)
         amount = f"{pack['amount_cents']/100:.2f}"
         return_url = origin() + "/?" + urlencode({"wallet": "return", "checkout": checkout_id})
         if data.provider == "paypal_link":

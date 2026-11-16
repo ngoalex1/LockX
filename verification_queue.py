@@ -234,6 +234,8 @@ def claim_job(worker_id):
     with database() as db:
         db.execute("BEGIN IMMEDIATE")
         schema(db)
+        import buyer_requests
+        buyer_requests.maintain(db,now)
         db.execute("INSERT INTO verification_workers VALUES (?,?,NULL) ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat", (worker_id, now))
         overdue = db.execute("SELECT * FROM verification_jobs WHERE state IN ('queued','retrying','budget_wait','running') AND queued_at<?", (now - 86400,)).fetchall()
         for job in overdue:

@@ -29,12 +29,15 @@ import cv2
 import httpx
 import numpy as np
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from fastapi.responses import Response, StreamingResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from PIL import Image, ImageDraw, ImageFont
 from lost_found import MAX_IMAGE, clean_photo, limited
 import credit_wallet as credits
 import verification_queue as verification_queue
+import buyer_requests
+import public_evidence
+from evidence_regions import EvidenceRegion, parse_region_candidates, validate_regions
 
 log = logging.getLogger("lockx.in_hand")
 MAX_PHOTOS, MAX_VIDEO, STAGE_SECONDS = 6, 60 * 1024 * 1024, 4
@@ -137,6 +140,8 @@ def database(*, read_only=False):
         parent_request_id TEXT PRIMARY KEY REFERENCES ih_requests(id),
         request_id TEXT NOT NULL UNIQUE REFERENCES ih_requests(id), reason TEXT NOT NULL);
     """)
+    buyer_requests.schema(db)
+    public_evidence.ensure_schema(db)
     try:
         yield db
         db.commit()
@@ -161,6 +166,19 @@ class Listing(BaseModel):
     auto_publish: bool = Field(default=False, strict=True)
     # Older consent authorized publication only when every photo matched.
     publish_matched_photos: bool = Field(default=False, strict=True)
+    request_kind: Literal["seller", "buyer"] = "seller"
+    listing_url: str = Field(default="", max_length=2000)
+    request_key: str = Field(default="", max_length=80)
+
+
+class CaptureStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    share_evidence: bool = Field(default=False, strict=True)
+
+
+class CloseInvitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent: Literal[True]
 
 
 class Progress(BaseModel):
@@ -272,6 +290,12 @@ class VisualAssessment(BaseModel):
     summary: str
     identifier_checks: list[IdentifierCheck] = Field(default_factory=list, max_length=40)
     capture_failure_reason: Literal["low_light", "motion_blur", "missing_views", "other"] | None = None
+    supporting_regions: list[EvidenceRegion] = Field(default_factory=list)
+
+    @field_validator("supporting_regions", mode="before")
+    @classmethod
+    def optional_regions(cls,value):
+        return parse_region_candidates(value)
 
 
 class Targets(BaseModel):
@@ -335,6 +359,8 @@ def status(row):
 
 
 def available(row):
+    if row["status"] in {"declined", "cancelled"}:
+        raise HTTPException(410,"This buyer request was declined or cancelled")
     if status(row) == "expired":
         raise HTTPException(410, "This inspection link has expired. Ask the requester for a new one.")
 
@@ -420,9 +446,11 @@ def view(db, row, private=False):
     credits.settle_check(db, row["id"])
     listing = json.loads(row["listing"])
     media = [dict(m) for m in db.execute("SELECT id,role,mime,sha256,seconds,label FROM ih_media WHERE request_id=? ORDER BY rowid", (row["id"],))]
-    result = {"id": row["id"], **{k:v for k,v in listing.items() if k != "consent" and (k != "auto_publish" or v is True)},
+    result = {"id": row["id"], **{k:v for k,v in listing.items() if k not in {"consent","request_key"} and (k != "auto_publish" or v is True)},
               "status": status(row), "created": row["created"], "expires": row["expires"],
               "submitted": row["submitted"], "media": media if private else [m for m in media if m["role"] == "listing"]}
+    if invitation := buyer_requests.info(db,row["id"]):
+        result["buyer_request"] = invitation
     if queue := verification_queue.public_status(db,row["id"]):
         result["queue"] = queue
     retry = db.execute("SELECT reason FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()
@@ -1232,7 +1260,12 @@ def analyze(request_id, queue_claim=None):
             "Set capture_failure_reason to low_light or motion_blur ONLY when the supplied quality_diagnostics.retry_reason agrees, every reference view was attempted, "
             "and that camera-quality problem is the sole reason no match can be established. Use missing_views if any reference view was not attempted; "
             "use other for any different or additional failure, and null when no capture failure exists. Blur alone does not establish camera shake. "
-            "This diagnostic never excuses an identifying-number difference, substitution, an unfulfilled challenge or suspicious continuity.", content,
+            "This diagnostic never excuses an identifying-number difference, substitution, an unfulfilled challenge or suspicious continuity. "
+            "Optionally return supporting_regions for directly visible individual details in supported photos. Return [] when uncertain or for digital tickets. "
+            "At most 2 regions per photo and 8 total. Each names its zero-based photo_index and ORIGINAL frame_index already cited by that photo finding. "
+            "reference_box and frame_box use x,y,width,height normalized from 0 to 1 relative to each complete upright image. "
+            "Use small, clearly corresponding regions; do not outline the entire object or invent hidden marks. Label at most 6 words, evidence at most 15 words. "
+            "These optional explanatory regions must not change the photo verdict. Never include usable codes, faces, private documents or credentials.", content,
             allowed_frame_indices=selected, photo_count=len(refs))
         analysis["video"]["vision_ms"] = round((perf_counter()-comparison_started)*1000, 2)
         if {p.photo_index for p in visual.photos} != set(range(len(refs))) or len(visual.photos) != len(refs):
@@ -1262,6 +1295,15 @@ def analyze(request_id, queue_claim=None):
         if "Capture ended before every required view was collected." in analysis["video"].get("notes",[]):
             summary = "Capture ended before every required view was collected. " + summary
         analysis.update(visual=visual.model_dump(), result=result, summary=summary)
+        # Annotation grounding is explanatory and cannot promote or invalidate
+        # the completed conservative item judgment.
+        try:
+            analysis["evidence_regions"] = validate_regions(
+                [region.model_dump() for region in visual.supporting_regions],refs,frames,
+                allowed_frame_indices=selected,
+                eligible_photo_indices=[p.photo_index for p in visual.photos if p.finding=="supported"])
+        except (cv2.error,ValueError,TypeError,KeyError):
+            analysis["evidence_regions"] = []
         analysis["video"]["analysis_ms"] = round((perf_counter()-analysis_started)*1000,2)
         with database() as db:
             if queue_claim:
@@ -1620,6 +1662,7 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False, q
             (require_auto and not automatic_publication_allowed(json.loads(row["listing"]),current["eligibility"]))):
         raise HTTPException(409,"The verification changed while its photos were being prepared")
     eligibility = current["eligibility"]
+    shared_evidence = public_evidence.prepare(db,row,eligibility["eligible_photo_indices"])
     db.execute("INSERT INTO ih_publications VALUES (?,?,?,NULL)",(publication_id,row["id"],time.time()))
     db.execute("INSERT INTO ih_publication_scopes VALUES (?,?)",(publication_id,eligibility["total_count"]))
     if current["location"]:
@@ -1631,6 +1674,7 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False, q
     for i in eligibility["eligible_photo_indices"]:
         media_id = store_media(db,row["id"],"marked","image/jpeg",rendered[i],label=f"Verified photo {i+1}")
         db.execute("INSERT INTO ih_publication_photos VALUES (?,?,?)",(publication_id,i,media_id))
+    public_evidence.store(db,publication_id,shared_evidence)
     analysis = json.loads(row["analysis"])
     analysis["video"]["publication_timing"] = {"render_wait_ms":render_ms,
         "write_ms":round((perf_counter()-write_started)*1000,2),"total_ms":round((perf_counter()-started)*1000,2),
@@ -1917,7 +1961,8 @@ def create_router(authenticate):
     def capabilities():
         return {"visual_comparison_ready":visual_ready(),"max_photos":MAX_PHOTOS,"max_photo_mb":5,"max_video_mb":60,"minimum_stage_seconds":STAGE_SECONDS,"camera_only":True,
                 "continuous_scan":True,"min_capture_seconds":SCAN_MIN_SECONDS,"max_capture_seconds":SCAN_MAX_SECONDS,
-                "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10,"credits_required":credits.enabled()}
+                "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10,"credits_required":credits.enabled(),
+                "buyer_requests":True,"shared_evidence":True,"grounded_evidence_regions":True}
 
     @router.post("/requests/{request_id}/publish",status_code=201)
     def publish(request_id: str, data: Publication, owner=Depends(access)):
@@ -1978,6 +2023,39 @@ def create_router(authenticate):
             item = db.execute("SELECT content FROM ih_media WHERE id=?",(media_id,)).fetchone()
             return Response(item["content"],media_type="image/jpeg",headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
 
+    def supporting_manifest(db,publication_id):
+        pub=db.execute("SELECT * FROM ih_publications WHERE id=? AND revoked IS NULL",(publication_id,)).fetchone()
+        row=db.execute("SELECT * FROM ih_requests WHERE id=?",(pub["request_id"],)).fetchone() if pub else None
+        manifest=publication_manifest(db,row,pub) if row else None
+        if not manifest:
+            raise HTTPException(404,"Supporting evidence is not available")
+        return manifest
+
+    @router.get("/public/{publication_id}/evidence")
+    def supporting_evidence(publication_id: str):
+        with database() as db:
+            return JSONResponse(public_evidence.get_payload(db,publication_id,supporting_manifest(db,publication_id)),headers=public_evidence.HEADERS)
+
+    @router.get("/public/{publication_id}/evidence/{media_key}")
+    def supporting_media(publication_id: str,media_key: str,request: Request):
+        with database() as db:
+            return public_evidence.get_media_response(db,publication_id,media_key,supporting_manifest(db,publication_id),
+                range_header=request.headers.get("range"),reader_factory=database)
+
+    @router.post("/requests/{request_id}/cancel")
+    def cancel_buyer_request(request_id: str,data: CloseInvitation,owner=Depends(access)):
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row=owned(db,request_id,owner)
+            return buyer_requests.close(db,row["id"],"cancelled")
+
+    @router.post("/seller/{token}/decline")
+    def decline_buyer_request(token: str,data: CloseInvitation):
+        with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row=seller(db,token)
+            return buyer_requests.close(db,row["id"],"declined")
+
     @router.post("/requests", status_code=201)
     async def create(request: Request, background: BackgroundTasks, owner=Depends(creator)):
         if verification_queue.enabled():
@@ -1996,13 +2074,25 @@ def create_router(authenticate):
             if any(len(note) > 350 for note in listing.photo_notes):
                 raise HTTPException(422,"Keep each photo note under 350 characters")
             photos = [clean_photo(await f.read(MAX_IMAGE+1)) for f in files]
+        if listing.request_kind=="buyer":
+            listing.listing_url=buyer_requests.listing_url(listing.listing_url)
+        elif listing.listing_url:
+            listing.listing_url=buyer_requests.listing_url(listing.listing_url)
         request_id, created, management_key = str(uuid4()), time.time(), secrets.token_urlsafe(32)
         with database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if listing.request_kind=="buyer":
+                fingerprint=buyer_requests.fingerprint(listing.model_dump(),photos)
+                prior=buyer_requests.find_request(db,owner,listing.request_key,fingerprint)
+                if prior:
+                    return view(db,owned(db,prior["request_id"],owner),True)
             db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)", (request_id,owner,secrets.token_urlsafe(32),listing.model_dump_json(),created,created+86400,json.dumps(make_plan(listing,len(photos)))))
             db.execute("INSERT INTO ih_access_keys VALUES (?,?)",(request_id,access_digest(management_key)))
             credits.bind_check(db,request_id,owner)
             for i,photo in enumerate(photos):
                 store_media(db,request_id,"listing","image/jpeg",photo,label=f"Reference photo {i+1}")
+            if listing.request_kind=="buyer":
+                buyer_requests.create_request(db,request_id,owner,listing.listing_url,listing.request_key,fingerprint)
             event(db, request_id, "Selected listing photos and description preserved")
             result = view(db,owned(db,request_id,owner),True)
             result["manage_key"] = management_key
@@ -2137,6 +2227,8 @@ def create_router(authenticate):
             cleanup_scan_media(db,now)
             row = seller(db,token)
             available(row)
+            if json.loads(row["listing"]).get("request_kind")=="buyer":
+                raise HTTPException(409,"Use the ten-second recording flow for this buyer request")
             if row["status"] not in {"waiting","capturing"}:
                 raise HTTPException(409,"This inspection has already been submitted")
             limited("in-hand-start:"+row["id"],12)
@@ -2159,7 +2251,7 @@ def create_router(authenticate):
             return scan_stage_view(sess,meta)
 
     @router.post("/seller/{token}/video/start")
-    def video_start(token: str):
+    def video_start(token: str, data: CaptureStart = CaptureStart()):
         """One fixed recording; every photo is compared after the camera stops."""
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -2172,6 +2264,8 @@ def create_router(authenticate):
                 raise HTTPException(409,"This inspection has already been submitted")
             limited("in-hand-start:"+row["id"],12)
             listing = Listing.model_validate_json(row["listing"])
+            if listing.request_kind=="buyer" and not data.share_evidence:
+                raise HTTPException(422,"Agree to share the item recording and supporting frames, or decline this buyer request")
             count = db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='listing'",(row["id"],)).fetchone()[0]
             movements = {
                 "handheld":["Slowly turn the same item all the way around to the left, showing its front, both sides, and back. Keep it in view.",
@@ -2190,6 +2284,7 @@ def create_router(authenticate):
                        (sid,row["id"],now,now,json.dumps([stage])))
             db.execute("INSERT INTO ih_scan_sessions(session_id,min_seconds,max_seconds) VALUES (?,?,?)",(sid,10,15))
             db.execute("UPDATE ih_requests SET status='capturing',session_id=? WHERE id=?",(sid,row["id"]))
+            public_evidence.record_capture_consent(db,row["id"],sid,data.share_evidence)
             cleanup_scan_media(db,now)
             event(db,row["id"],"Fresh ten-second continuous item recording started")
             sess = db.execute("SELECT * FROM ih_sessions WHERE id=?",(sid,)).fetchone()
@@ -2426,6 +2521,8 @@ def create_router(authenticate):
             verification_queue.check_capacity(db)
             row = seller(db,token)
             available(row)
+            if json.loads(row["listing"]).get("request_kind")=="buyer":
+                raise HTTPException(409,"Use the ten-second recording flow for this buyer request")
             if row["status"] not in {"waiting","capturing"}:
                 raise HTTPException(409,"This inspection has already been submitted")
             limited("in-hand-start:" + row["id"], 12)
