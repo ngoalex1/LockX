@@ -24,7 +24,7 @@ class FormDataFake {
   get(key){return this.entries.find(entry=>entry[0]===key)?.[1];}
 }
 function harness(options={}) {
-  const nodes=new Map(),requests=[],timers=new Map(),events={},calls={ensure:0,refresh:0,camera:0,recording:0,clipboard:[],shares:[]};let timer=0;
+  const nodes=new Map(),requests=[],timers=new Map(),events={},calls={ensure:0,refresh:0,camera:0,recording:0,clipboard:[],shares:[],navigation:[]};let timer=0;
   class Element {
     constructor(){this._html='';this.htmlWrites=0;this.textContent='';this.hidden=false;this.isConnected=true;this.dataset={};this.style={};this.checked=false;this.disabled=false;this.value='';this.attributes={};this.classList={add(){},remove(){},toggle(){}};}
     get innerHTML(){return this._html;}
@@ -54,15 +54,15 @@ function harness(options={}) {
     querySelector(selector){return nodes.get(selector)||null;}
     querySelectorAll(selector){return selector==='input,select,[data-remove],[data-select],#ihChoosePhotos,#ihLoadListingPhotos'?['#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihChoosePhotos','#ihLoadListingPhotos'].map(id=>nodes.get(id)):[];}
   }
-  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
+  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerMessageReview','#ihMarketplaceCopyStatus','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
   nodes.get('#ihRequestForm').dataset.buyer='true';nodes.get('#ihBuyerCaptureMode').value='handheld';nodes.get('#ihBuyerTitle').value='Listing camera';nodes.get('#ihListingURL').value='https://market.example/items/123';
   const document={body:new Element(),hidden:false,readyState:'loading',querySelector:selector=>nodes.get(selector)||null,querySelectorAll:()=>[],createElement:()=>new Element(),addEventListener(){}};
   const stream={getTracks:()=>[{stop(){}}],getVideoTracks:()=>[{stop(){}}]};
   class Recorder {static isTypeSupported(){return true;}constructor(){this.state='inactive';}start(){this.state='recording';calls.recording++;}}
   const window={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:{stopRecorder(){}},innerHeight:800,innerWidth:400,speechSynthesis:{},matchMedia:()=>({matches:true}),scrollTo(){},addEventListener:(name,fn)=>events[name]=fn,LockXCredits:{authorization:async()=>options.noAuthorization?'':'Bearer fake-owner',ensureForVerification:async()=>{calls.ensure++;await options.ensure?.();},refresh:()=>{calls.refresh++;},decorate(){}}};
-  const navigator={userAgent:'iPhone',clipboard:{writeText:async text=>{if(options.clipboardFail)throw Error('Clipboard unavailable');calls.clipboard.push(text);}},mediaDevices:{getUserMedia:async()=>{calls.camera++;return stream;}}};
+  const navigator={userAgent:'iPhone',clipboard:{writeText:async text=>{if(options.clipboardFail)throw Error('Clipboard unavailable');await options.clipboardWrite?.(text);calls.clipboard.push(text);}},mediaDevices:{getUserMedia:async()=>{calls.camera++;return stream;}}};
   if(options.share)navigator.share=async data=>{calls.shares.push(data);if(options.shareFail)throw Error('Share unavailable');};
-  const context={window,document,navigator,API_BASE:'https://api.example/v1',location:{hash:'#other',origin:'https://lockx.example',pathname:'/'},URL,URLSearchParams,Headers,Blob,Uint8Array,atob,FormData:FormDataFake,AbortController,Date,Intl,JSON,Promise,Map,Set,Number,Math,Error,crypto:webcrypto,MediaRecorder:Recorder,performance:{now:()=>100},btoa:value=>Buffer.from(value,'binary').toString('base64'),localStorage:{getItem:()=>null,setItem(){}},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id),setInterval:()=>999,clearInterval(){},go(){},toast(){},fetch:async(url,init={})=>{requests.push({url,init});if(url.endsWith('/capabilities'))return response({visual_comparison_ready:true,buyer_requests:true,listing_photo_import:true});return options.fetch?options.fetch(url,init):response(record());}};
+  const context={window,document,navigator,API_BASE:'https://api.example/v1',location:{hash:'#other',origin:'https://lockx.example',pathname:'/',assign:url=>calls.navigation.push(url)},URL,URLSearchParams,Headers,Blob,Uint8Array,atob,FormData:FormDataFake,AbortController,Date,Intl,JSON,Promise,Map,Set,Number,Math,Error,crypto:webcrypto,MediaRecorder:Recorder,performance:{now:()=>100},btoa:value=>Buffer.from(value,'binary').toString('base64'),localStorage:{getItem:()=>null,setItem(){}},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id),setInterval:()=>999,clearInterval(){},go(){},toast(){},fetch:async(url,init={})=>{requests.push({url,init});if(url.endsWith('/capabilities'))return response({visual_comparison_ready:true,buyer_requests:true,listing_photo_import:true});return options.fetch?options.fetch(url,init):response(record());}};
   let code=source.replace(/\}\)\(\);\s*$/,`window.testBuyer={page,showBuyer,loadListingPhotos,scheduleListingImport,addPhotos,renderPhotos,createRequest,buyerMessage,buyerRequestBox,bindBuyerRequest,copyBuyerMessage,safeListingURL,sourceLink,reportFingerprint,pollReport,showReport,showSeller,showPublic,startCapture,route,loadSellerEmail,sellerEmailState,preparedEmailURL,safeSellerEmail,setManagementKey(value){managementKey=value;},setCapabilities(value){capabilities=value;},setPhotos(value){photos=value;},getPhotos(){return photos;},getAttempt(){return buyerAttempt;},setCompressor(fn){compressPhoto=fn;},setRoute(value){routeNumber=value;},setupCapture(record){document.querySelector('#ihSellerConsent').checked=true;sellerData=record;sellerToken='capture-token';routeNumber=1;isStandalone=true;location.hash='#in-hand/capture/capture-token';browserAccess.records[record.id]='${managementKey}';prepareCaptureLocation=async()=>false;renderCamera=()=>{document.querySelector('#ihShareEvidence').checked=false;};positionReticle=()=>{};requestCaptureLocation=()=>{};renderUploadStatus=()=>{};updateCameraFeedback=()=>{};pumpChunks=()=>{};speak=()=>{};}};})();`);
   vm.createContext(context);vm.runInContext(code,context);
   return {api:window.testBuyer,nodes,requests,timers,calls,context,events};
@@ -96,15 +96,24 @@ test('seller invitation keeps email first and offers the same safe marketplace-s
   assert.match(message,/#in-hand\/capture\/seller-capture-token/);assert.match(message,/https:\/\/market.example\/items\/123/);assert.doesNotMatch(message,/report\/|kkkkk|manage/i);assert.match(html,/Copy or share this message yourself/);assert.ok(html.indexOf('ihSellerEmail')<html.indexOf('ihCopyBuyerMessage'));assert.doesNotMatch(html,/request sent|message sent/i);assert.match(html,/Copy message/);assert.match(html,/Share message/);assert.match(html,/Cancel request/);assert.match(html,/noopener noreferrer/);
 });
 
-test('Facebook Marketplace and eBay show a visible copy-first request with the actual listing and no email draft fetch',async()=>{
+test('Facebook Marketplace and eBay copy the reviewed request and open the original listing in the same tab without email calls',async()=>{
   for(const [listing_url,name] of [[facebookURL,'Facebook Marketplace'],[ebayURL,'eBay']]){
     const r=record();r.buyer_request.listing_url=listing_url;
     const h=harness({fetch:async()=>assert.fail('A platform conversation request must not fetch an email draft')});await flush();h.api.setRoute(1);h.api.setManagementKey(managementKey);await h.api.showReport(r.id,1,r);await flush();
-    const html=h.api.page.innerHTML;assert.match(html,/Copy verification request/);assert.ok(html.includes('Open '+name+' ↗'));assert.ok(html.includes('href="'+listing_url+'"'));assert.match(html,/target="_blank" rel="noopener noreferrer"/);assert.ok(html.includes('existing '+name+' conversation'));assert.match(html,/paste it, and click Send there/);assert.match(html,/id="ihBuyerMessage"[^>]*readonly/);assert.match(html,/Copying only puts the message on your clipboard/);assert.match(html,/same 1-credit check; no extra charge/);
-    assert.doesNotMatch(html,/id="ihSellerEmail"|ih-buyer-share-alternative|seller\/contact|messenger\.com|request (?:was )?sent/i);assert.ok(html.indexOf('Copy verification request')<html.indexOf('id="ihBuyerMessage"'));
+    const html=h.api.page.innerHTML;assert.match(html,/Copy request &amp; open listing/);assert.ok(html.includes('Open '+name+' ↗'));assert.ok(html.includes('href="'+listing_url+'"'));assert.match(html,/target="_blank" rel="noopener noreferrer"/);assert.ok(html.includes('Copy the request and open '+name+' in one tap.'));assert.match(html,/<h2>Your request is ready\.<\/h2>/);assert.match(html,/Paste in the seller chat, then tap Send/);assert.match(html,/id="ihBuyerMessage"[^>]*readonly/);assert.match(html,/Paste in the seller chat, then tap Send\. Same 1-credit check; no extra charge\./);assert.match(html,/<details id="ihBuyerMessageReview"[^>]*><summary>Review message<\/summary>/);assert.match(html,/Same 1-credit check; no extra charge/);
+    assert.doesNotMatch(html,/id="ihSellerEmail"|ih-buyer-share-alternative|seller\/contact|messenger\.com|request (?:was )?sent/i);assert.ok(html.indexOf('Copy request &amp; open listing')<html.indexOf('id="ihBuyerMessage"'));
     await h.nodes.get('#ihCopyBuyerMessage').onclick();assert.equal(h.calls.clipboard[0],h.api.buyerMessage(r));assert.match(h.calls.clipboard[0],/#in-hand\/capture\/seller-capture-token/);assert.ok(h.calls.clipboard[0].includes('Listing: '+listing_url));assert.match(h.calls.clipboard[0],/10-second LockX video/);assert.match(h.calls.clipboard[0],/50¢ check/);assert.match(h.calls.clipboard[0],/free for you/);assert.match(h.calls.clipboard[0],/no LockX account/);assert.match(h.calls.clipboard[0],/review the recording and sharing permissions/);assert.doesNotMatch(h.calls.clipboard[0],/report\/|kkkkk|manage|already verified|eBay approved|eBay endorsed|pay me|payment link/i);
+    assert.deepEqual(h.calls.navigation,[listing_url]);assert.equal(h.nodes.get('#ihMarketplaceCopyStatus').textContent,'Copied. Paste in the seller chat, then tap Send.');
     assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,0);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);assert.equal(h.calls.camera,0);
     await h.api.loadSellerEmail(r,1);assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,0);
+  }
+});
+
+test('the combined marketplace action waits for successful clipboard access before navigating',async()=>{
+  for(const listing_url of [facebookURL,ebayURL]){
+    let finish;const h=harness({clipboardWrite:()=>new Promise(resolve=>finish=resolve)});await flush();const r=record();r.buyer_request.listing_url=listing_url;h.api.bindBuyerRequest(r,1);
+    const copying=h.nodes.get('#ihCopyBuyerMessage').onclick();assert.deepEqual(h.calls.navigation,[]);assert.deepEqual(h.calls.clipboard,[]);
+    finish();await copying;assert.deepEqual(h.calls.clipboard,[h.api.buyerMessage(r)]);assert.deepEqual(h.calls.navigation,[listing_url]);assert.equal(h.requests.filter(request=>request.init.method==='POST'||request.url.endsWith('/seller-email')).length,0);
   }
 });
 
@@ -121,24 +130,34 @@ test('marketplace conversation detection recognizes mobile Facebook paths and kn
 
 test('eBay link restrictions are visible beside Copy and before request creation without affecting Facebook',async()=>{
   const r=record();r.buyer_request.listing_url=ebayURL;const h=harness();await flush();
-  const html=h.api.buyerRequestBox(r);assert.match(html,/eBay restricts external links and may block this request\. Keep your purchase and payment on eBay\./);assert.ok(html.indexOf('eBay restricts external links')<html.indexOf('Copy verification request'));assert.match(html,/if the platform allows the verification link/);assert.match(h.api.buyerMessage(r),/Purchase and payment stay on eBay; this is only an item verification request\./);
+  const html=h.api.buyerRequestBox(r);assert.match(html,/eBay restricts external links and may block this request\. Keep your purchase and payment on eBay\./);assert.ok(html.indexOf('eBay restricts external links')<html.indexOf('Copy request &amp; open listing'));assert.match(h.api.buyerMessage(r),/Purchase and payment stay on eBay; this is only an item verification request\./);
   h.api.showBuyer(ebayURL);assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,false);assert.match(h.nodes.get('#ihMarketplacePolicy').textContent,/before creating a request and reserving 1 credit/);assert.equal(h.calls.ensure,0);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
-  h.nodes.get('#ihListingURL').value=facebookURL;h.nodes.get('#ihListingURL').oninput();assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,true);r.buyer_request.listing_url=facebookURL;assert.doesNotMatch(h.api.buyerRequestBox(r),/eBay restricts|if the platform allows/);assert.doesNotMatch(h.api.buyerMessage(r),/payment stay on eBay/);
+  h.nodes.get('#ihListingURL').value=facebookURL;h.nodes.get('#ihListingURL').oninput();assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,true);r.buyer_request.listing_url=facebookURL;assert.doesNotMatch(h.api.buyerRequestBox(r),/eBay restricts/);assert.doesNotMatch(h.api.buyerMessage(r),/payment stay on eBay/);
   h.nodes.get('#ihListingURL').value=ebayURL;h.nodes.get('#ihListingURL').oninput();assert.equal(h.nodes.get('#ihMarketplacePolicy').hidden,false);assert.equal(h.calls.ensure,0);
 });
 
 test('ambiguous paths and spoofed platform domains retain the generic email workflow',async()=>{
-  for(const listing_url of ['https://facebook.com/marketplacefake/item/123','https://www.facebook.com/profile.php?id=123','https://facebook.com.evil.example/marketplace/item/123','https://notfacebook.com/marketplace/item/123','https://ebay.com.evil.example/itm/123','https://notebay.com/itm/123','https://ebay.example/itm/123']){
+  for(const listing_url of ['https://facebook.com/marketplacefake/item/123','https://www.facebook.com/profile.php?id=123','https://facebook.com.evil.example/marketplace/item/123','https://notfacebook.com/marketplace/item/123','https://ebay.com.evil.example/itm/123','https://notebay.com/itm/123','https://ebay.example/itm/123','https://ebay.com@evil.example/itm/123','javascript:alert(1)']){
     const r=record();r.buyer_request.listing_url=listing_url;
     const h=harness({fetch:async()=>response(emailDraft())});await flush();h.api.setRoute(1);await h.api.showReport(r.id,1,r);await flush();
-    assert.match(h.api.page.innerHTML,/id="ihSellerEmail"/);assert.doesNotMatch(h.api.page.innerHTML,/Open Facebook Marketplace|Open eBay|Copy verification request/);assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,1);
+    assert.match(h.api.page.innerHTML,/id="ihSellerEmail"/);assert.doesNotMatch(h.api.page.innerHTML,/Open Facebook Marketplace|Open eBay|Copy request &amp; open listing/);assert.equal(h.requests.filter(request=>request.url.endsWith('/seller-email')).length,1);
+    await h.nodes.get('#ihCopyBuyerMessage').onclick();assert.deepEqual(h.calls.navigation,[]);
   }
 });
 
-test('platform clipboard failure selects the visible prepared message without sending',async()=>{
-  const r=record();r.buyer_request.listing_url=facebookURL;
-  const h=harness({clipboardFail:true});await flush();h.api.setRoute(1);await h.api.showReport(r.id,1,r);await h.nodes.get('#ihCopyBuyerMessage').onclick();
-  assert.equal(h.nodes.get('#ihBuyerMessage').focused,true);assert.equal(h.nodes.get('#ihBuyerMessage').selected,true);assert.equal(h.requests.filter(request=>request.init.method==='POST'||request.url.endsWith('/seller-email')).length,0);assert.equal(h.calls.ensure,0);
+test('failed marketplace clipboard access expands and selects the prepared message without navigating or sending',async()=>{
+  for(const listing_url of [facebookURL,ebayURL]){
+    const r=record();r.buyer_request.listing_url=listing_url;
+    const h=harness({clipboardFail:true});await flush();h.api.setRoute(1);await h.api.showReport(r.id,1,r);h.nodes.get('#ihBuyerMessage').hidden=true;await h.nodes.get('#ihCopyBuyerMessage').onclick();
+    assert.equal(h.nodes.get('#ihBuyerMessageReview').open,true);assert.equal(h.nodes.get('#ihBuyerMessage').hidden,false);assert.equal(h.nodes.get('#ihBuyerMessage').focused,true);assert.equal(h.nodes.get('#ihBuyerMessage').selected,true);assert.deepEqual(h.calls.navigation,[]);assert.match(h.nodes.get('#ihMarketplaceCopyStatus').textContent,/Copy the selected message.*Paste in the seller chat, then tap Send/);assert.equal(h.requests.filter(request=>request.init.method==='POST'||request.url.endsWith('/seller-email')).length,0);assert.equal(h.calls.ensure,0);
+  }
+});
+
+test('generic listing and Craigslist copy actions keep the current page',async()=>{
+  for(const listing_url of [listingURL,craigslistURL]){
+    const h=harness();await flush();const r=record();r.buyer_request.listing_url=listing_url;h.api.bindBuyerRequest(r,1);await h.nodes.get('#ihCopyBuyerMessage').onclick();
+    assert.deepEqual(h.calls.clipboard,[h.api.buyerMessage(r)]);assert.deepEqual(h.calls.navigation,[]);assert.match(h.api.buyerRequestBox(r),/id="ihSellerEmail"/);
+  }
 });
 
 test('native sharing failure falls back to copying the same seller message',async()=>{

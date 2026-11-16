@@ -55,11 +55,13 @@ body.lockx-public .lx-home .lx-buyer-entry .lx-button{min-height:48px;min-width:
 .ih-buyer-share-alternative summary{cursor:pointer;min-height:28px;font-size:13px;color:#86545c;font-weight:600}
 .ih-buyer-share-alternative>p{font-size:12px;color:#78696d}
 .ih-marketplace-request{margin:16px 0 20px;padding:22px;border:1px solid #dcc0b9;border-radius:14px;background:#fff7f1}
-.ih-marketplace-request h3{margin:10px 0 18px;font:400 26px/1.25 Georgia,"Times New Roman",serif;color:#49343a}
 .ih-marketplace-request .ih-link-actions{display:flex;flex-wrap:wrap;gap:10px}
 .ih-marketplace-request .ih-link-actions .ih-button{justify-content:center;min-height:48px;text-align:center;box-sizing:border-box;white-space:normal}
 .ih-marketplace-request .ih-marketplace-send-hint{font-size:11px;line-height:1.7;color:#78666b;margin:10px 0 0}
 .ih-marketplace-request .ih-marketplace-policy,.ih-buyer-form .ih-marketplace-policy{font-size:12px;line-height:1.7;margin:0 0 16px}
+.ih-marketplace-message-review{margin-top:16px;border-top:1px solid #eadbd4}
+.ih-marketplace-message-review summary{display:list-item;cursor:pointer;padding:13px 0;font-size:12px;font-weight:600;color:#86545c;min-height:44px;box-sizing:border-box}
+.ih-marketplace-message-review[open] summary{padding-bottom:0}
 @media(max-width:600px){.ih-marketplace-request{padding:18px 15px;border-radius:11px}.ih-marketplace-request .ih-link-actions{display:grid;grid-template-columns:1fr}.ih-marketplace-request .ih-link-actions .ih-button{width:100%}.ih-marketplace-request .ih-buyer-message-label textarea{font-size:16px}}
 @media(max-width:600px){.ih-seller-email{padding:18px 15px;margin-top:15px;border-radius:11px}.ih-seller-email h3{font-size:26px}.ih-page .ih-seller-email input,.ih-page .ih-seller-email select,.ih-page .ih-seller-email textarea{font-size:16px}.ih-page .ih-seller-email #ihSellerEmailBody{min-height:280px}.ih-seller-contact-link{width:100%}}
 @media(max-width:600px){body.lockx-public .lx-home .lx-buyer-entry{width:calc(100% - 34px);padding:21px 19px;margin-top:18px;border-radius:14px}body.lockx-public .lx-home .lx-buyer-entry h2{font-size:27px}.lx-buyer-entry-fields{flex-direction:column;gap:9px}.lx-buyer-entry input{font-size:16px;min-height:48px;width:100%}.lx-buyer-entry-fields .lx-button{width:100%}.lx-buyer-entry small{font-size:10px}.ih-buyer-request .ih-link-actions{display:grid;grid-template-columns:1fr}.ih-buyer-request .ih-link-actions .ih-button{width:100%}.ih-buyer-request .ih-buyer-expiry{margin-top:15px}.ih-buyer-message-label textarea{min-height:250px}.ih-page .ih-buyer-hero h1{font-size:36px}.ih-buyer-form label small{font-size:11px}}
