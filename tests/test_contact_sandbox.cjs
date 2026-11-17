@@ -14,14 +14,14 @@ const response=value=>new Response(JSON.stringify(value),{headers:{'Content-Type
 function fixture(options={}){
   const events=[],files=[],creates=[],commands=[];
   const observed=options.claim||claim();
-  const sandbox={name:'sbx_fixture',
+  const sandbox={name:'sbx_fixture',cwd:options.cwd||'/vercel/sandbox',
     async writeFiles(values){events.push('write');files.push(...values);if(options.writeFail)throw Error('private write detail');},
     async runCommand(params){
       commands.push(params);events.push('command:'+params.cmd);
       if(options.commandThrow)throw Error('private command detail');
       let output='';
       if(params.args?.includes('--probe'))output=JSON.stringify(options.probe||{version:1,status:'ready',sandbox:true,userns:true});
-      else if(params.args?.includes('/vercel/sandbox/lockx-contact/job.json'))output=options.output===undefined?JSON.stringify({version:1,nonce:NONCE,url:URL,status:'revealed',email:'seller-relay@sale.craigslist.org'}):options.output;
+      else if(params.args?.some(value=>value.endsWith('/lockx-contact/job.json')))output=options.output===undefined?JSON.stringify({version:1,nonce:NONCE,url:URL,status:'revealed',email:'seller-relay@sale.craigslist.org'}):options.output;
       return {async *logs(){if(output)yield {stream:'stdout',data:output};},async wait(){return {exitCode:options.exitCode||0};},async kill(){events.push('kill');}};
     },
     async update(value){events.push('network:'+value.networkPolicy);},
@@ -74,6 +74,14 @@ test('lookup creates one fresh constrained VM, uploads no secrets, and returns e
 test('each lookup creates and deletes its own VM without persistent session reuse',async()=>{
   const {contactRequest}=await library;const f=fixture();await contactRequest({ticket:TICKET},f.dependencies);await contactRequest({ticket:TICKET},f.dependencies);
   assert.equal(f.creates.length,2);assert.equal(f.events.filter(value=>value==='stop').length,2);assert.equal(f.events.filter(value=>value==='delete').length,2);assert.ok(f.creates.every(value=>value.persistent===false));
+});
+
+test('all worker paths follow the actual managed-image working directory',async()=>{
+  const {contactRequest}=await library;const f=fixture({cwd:'/home/sandbox'});
+  const answer=await contactRequest({ticket:TICKET},f.dependencies);assert.equal(answer.body.status,'revealed');
+  assert.ok(f.files.every(file=>file.path.startsWith('/home/sandbox/lockx-contact/')));
+  assert.equal(f.commands[0].cwd,'/home/sandbox');assert.equal(f.commands[0].cmd,'/home/sandbox/contact-venv/bin/python');
+  assert.equal(f.commands[0].env.PLAYWRIGHT_BROWSERS_PATH,'/home/sandbox/contact-browsers');
 });
 
 test('missing clean snapshot fails closed after admission without creating a VM',async()=>{

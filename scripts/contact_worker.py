@@ -148,7 +148,7 @@ def main():
         with open(os.devnull, 'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
             if len(sys.argv) == 2 and sys.argv[1] == '--probe':
                 result = probe()
-            elif len(sys.argv) == 2 and sys.argv[1] == '/vercel/sandbox/lockx-contact/job.json':
+            elif len(sys.argv) == 2 and sys.argv[1] == str(Path(__file__).resolve().with_name('job.json')):
                 result = lookup(sys.argv[1])
             else:
                 raise ValueError('Invalid worker arguments')
