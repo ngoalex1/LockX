@@ -55,38 +55,40 @@
   }
 
   const markup = `
-    <section id="landing" class="page landing-page lx-home" aria-labelledby="lxHeroTitle">
-      <section class="lx-buyer-entry lx-wrap" aria-labelledby="lxBuyerTitle"><div><p class="lx-eyebrow">For buyers · Any marketplace</p><h2 id="lxBuyerTitle">Buying? Ask for proof.</h2><p>A fresh item video. A photo-by-photo check. You share the request.</p></div><form id="lxBuyerRequestForm"><label for="lxBuyerListing">Public listing link</label><div class="lx-buyer-entry-fields"><input id="lxBuyerListing" type="url" name="listing" inputmode="url" autocomplete="url" placeholder="Paste a selling link…" required maxlength="2000"><button class="lx-button" type="submit">Ask seller for proof ${arrow}</button></div><small>1 credit · 50¢ · Seller records free · Listing photos load next</small></form></section>
-      <div class="lx-hero lx-wrap lx-compact-hero">
-        <div class="lx-compact-intro">
+    <section id="landing" class="page landing-page lx-home lx-chapters-home" aria-labelledby="lxHeroTitle">
+      <section class="lx-chapters-hero lx-wrap" aria-labelledby="lxHeroTitle">
+        <div class="lx-chapters-intro">
           <p class="lx-eyebrow">LockX in-hand verification</p>
-          <p class="lx-compact-roi">The best ROI in sales.</p>
-          <h1 id="lxHeroTitle"><span class="lx-compact-stat">45%</span><span class="lx-compact-headline">more buying<br>confidence.</span></h1>
-          <p class="lx-compact-price">For just 50¢.</p>
-          <figure class="lx-compact-proof" aria-label="Illustrative LockX verified Pokémon card photo">
-            <div class="lx-compact-proof-card">
-              ${pokemonCard('front','compact-verified-photo').replace('viewBox="0 0 260 200"','viewBox="60 10 140 180"')}
-              <div class="lx-compact-proof-seal"><div><span class="lx-compact-proof-brand">lock<span>x</span></span><small>${check} In-hand Verified</small></div>${qr()}</div>
-            </div>
-            <figcaption>Illustrative example</figcaption>
-          </figure>
-          <p class="lx-compact-description">Match your listing photos to a fresh 10-second item video. Give buyers a verification record they can check.</p>
-          <div class="lx-compact-actions"><a class="lx-button" href="#in-hand">Verify your listing photos ${arrow}</a><p class="lx-compact-note">50¢ per item check · Credit packs from $5</p></div>
+          <p class="lx-chapters-roi">The best ROI in sales.</p>
+          <h1 id="lxHeroTitle"><span class="lx-chapters-stat">45%</span><span class="lx-chapters-headline">more buying<br>confidence.<em>For just 50¢.</em></span></h1>
         </div>
-        <section class="lx-process-band" aria-label="How verification works">
-        <div class="lx-compact-art">${inHandCapture('compact-video')}</div>
-        <section class="lx-compact-steps" id="lxHowItWorks" aria-label="How LockX works in three steps">
-          <ol>
-            <li><span aria-hidden="true">01</span><div><h2>Take photos</h2><p>Add the photos you plan to list.</p></div></li>
-            <li><span aria-hidden="true">02</span><div><h2>Confirm with video</h2><p>Record the item in hand for 10 seconds.</p></div></li>
-            <li><span aria-hidden="true">03</span><div><h2>Get verified</h2><p>Share matched photos with a QR verification link.</p></div></li>
-          </ol>
+      </section>
+      <div id="lxHowItWorks" class="lx-chapters" aria-label="Choose buyer or seller verification">
+        <section class="lx-chapter lx-chapter-buyer" aria-labelledby="lxBuyerTitle">
+          <div class="lx-chapter-inner lx-wrap">
+            <div class="lx-chapter-heading"><p class="lx-eyebrow">For buyers</p><h2 id="lxBuyerTitle">You ask.<br>The seller shows.</h2><p class="lx-chapter-cost">Buyer pays 1 credit · 50¢</p></div>
+            <ol class="lx-chapter-steps">
+              <li><span aria-hidden="true">01</span><p>Paste a public listing link. Review up to 4 imported photos.</p></li>
+              <li><span aria-hidden="true">02</span><p>Share your request. The seller records 10 seconds, free.</p></li>
+              <li><span aria-hidden="true">03</span><p>Get visual match proof to compare for yourself.</p></li>
+            </ol>
+            <form id="lxBuyerRequestForm" class="lx-chapter-listing-form"><label for="lxBuyerListing">Public listing link</label><div class="lx-chapter-listing-fields"><input id="lxBuyerListing" type="url" name="listing" inputmode="url" autocomplete="url" placeholder="Paste a public selling link…" required maxlength="2000"><button class="lx-button" type="submit">Ask seller for proof ${arrow}</button></div><small>Public photo imports depend on marketplace access. You share the request with the seller.</small></form>
+          </div>
         </section>
-        <p class="lx-rose-scope">Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</p>
+        <section class="lx-chapter lx-chapter-seller" aria-labelledby="lxSellerTitle">
+          <div class="lx-chapter-inner lx-wrap">
+            <div class="lx-chapter-heading"><p class="lx-eyebrow">For sellers</p><h2 id="lxSellerTitle">Your item.<br>Visible proof.</h2><p class="lx-chapter-cost">Seller pays 1 credit · 50¢</p></div>
+            <ol class="lx-chapter-steps">
+              <li><span aria-hidden="true">01</span><p>Add up to 4 photos of the item you’re selling.</p></li>
+              <li><span aria-hidden="true">02</span><p>Show the same item in a fresh 10-second video.</p></li>
+              <li><span aria-hidden="true">03</span><p>Get verified photos with a QR code buyers can check.</p></li>
+            </ol>
+            <a class="lx-button lx-chapter-action lx-chapter-action-outline" href="#in-hand">I’m selling ${arrow}</a>
+          </div>
         </section>
       </div>
-
-      <section class="lx-faq lx-section lx-wrap" id="lxQuestions" aria-labelledby="lxFAQTitle"><div class="lx-section-heading"><h2 id="lxFAQTitle">A few good questions.</h2></div><div class="lx-faq-list"><details><summary>What does In-hand Verified confirm?<span aria-hidden="true">+</span></summary><p>It checks whether your selected photos match the physical item shown in a newly recorded video. It does not establish brand authenticity, legal ownership, condition beyond what is visible, or a guarantee of a transaction.</p></details><details><summary>Do I need an app or an account?<span aria-hidden="true">+</span></summary><p>No. Add your photos and open the camera link in your phone’s browser. Keep your private link so you can return to your result.</p></details><details><summary>How long does it take?<span aria-hidden="true">+</span></summary><p>The recording lasts 10 seconds and stops automatically. Upload and AI comparison follow; the total time depends on your connection, photos, and the evidence captured.</p></details><details><summary>How do I save the verified photos?<span aria-hidden="true">+</span></summary><p>Your approved images appear with QR codes even if another selected photo does not match. Only verified photos are included when saving. Tap the save button, then choose Save Images on iPhone or a supported save option on Android. Your phone asks you to confirm. Individual image saving is also available.</p></details></div></section>
+      <section class="lx-chapters-note lx-wrap" aria-label="Verification cost and evidence sharing"><p><strong>Same 50¢ check. Different starting points.</strong> A seller responding to a buyer’s paid request records free.</p><p>No app. No password. Video and supporting frames are shared with the seller’s consent.</p><small>Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</small></section>
+      <section class="lx-faq lx-section lx-wrap" id="lxQuestions" aria-labelledby="lxFAQTitle"><div class="lx-section-heading"><h2 id="lxFAQTitle">A few good questions.</h2></div><div class="lx-faq-list"><details><summary>What does In-hand Verified confirm?<span aria-hidden="true">+</span></summary><p>It checks whether your selected photos match the physical item shown in a newly recorded video. It does not establish brand authenticity, legal ownership, condition beyond what is visible, or a guarantee of a transaction.</p></details><details><summary>Do I need an app or a password?<span aria-hidden="true">+</span></summary><p>No app or password is needed. Buyers and sellers who start a check sign in with an email link to use their credits. A seller responding to a buyer’s paid request records free, without an account.</p></details><details><summary>How long does it take?<span aria-hidden="true">+</span></summary><p>The recording lasts 10 seconds and stops automatically. Upload and AI comparison follow; the total time depends on your connection, photos, and the evidence captured.</p></details><details><summary>How do I save the verified photos?<span aria-hidden="true">+</span></summary><p>Your approved images appear with QR codes even if another selected photo does not match. Only verified photos are included when saving. Tap the save button, then choose Save Images on iPhone or a supported save option on Android. Your phone asks you to confirm. Individual image saving is also available.</p></details></div></section>
 
       <section class="lx-final-cta lx-wrap"><div class="lx-cta-emblem">${check}</div><h2>A little proof.<br>A lot more confidence.</h2><p>Start with the photos you already have.</p><a href="#in-hand" class="lx-button">Verify your photos ${arrow}</a></section>
       <footer class="lx-footer"><div class="lx-wrap"><a class="lx-wordmark" href="#landing" aria-label="LockX home">lock<span>x</span><small class="lx-brand-credit">OpenAI technology</small></a><span>In-hand verification. Made for your listing photos.</span><small>© ${new Date().getFullYear()} LockX</small></div></footer>
