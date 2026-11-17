@@ -2,7 +2,7 @@
   "functions": {
     "api/craigslist-contact.mjs": {
       "maxDuration": 300,
-      "includeFiles": ["craigslist_contact.py", "scripts/contact_worker.py"]
+      "includeFiles": "{craigslist_contact.py,scripts/contact_worker.py}"
     }
   },
   "rewrites": [
