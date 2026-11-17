@@ -214,6 +214,67 @@ def diagnostic(path):
         patch(owner,name,wrapped)
 
     original_fetch = helper._Traffic.fetch
+    original_visible = helper._visible_email
+    original_click = helper._click_one
+
+    async def click(locator):
+        at = time.monotonic()
+        try:
+            value = await original_click(locator)
+            event('click',at)
+            return value
+        except BaseException as error:
+            event('click',at,**_diagnostic_error(error))
+            page = getattr(locator,'page',None)
+            if page is not None:
+                check = time.monotonic()
+                try:
+                    present = bool(await asyncio.wait_for(original_visible(page),timeout=.25))
+                    event('late-relay-present' if present else 'late-relay-absent',check)
+                except BaseException as check_error:
+                    event('late-relay-check',check,error=_diagnostic_error(check_error)['error'])
+                check = time.monotonic()
+                try:
+                    option = page.locator('button.reply-option-header').filter(has_text=re.compile(r'^\s*email\s*$',re.I))
+                    present = bool(await asyncio.wait_for(option.count(),timeout=.25))
+                    event('email-option-present' if present else 'email-option-absent',check)
+                except BaseException as check_error:
+                    event('email-option-check',check,error=_diagnostic_error(check_error)['error'])
+            raise
+
+    def reply_json(body,at):
+        # Observability only: never return response values, messages, tokens,
+        # relay addresses or nested content. Only bounded identifier keys and
+        # exact, known machine error codes can leave this process.
+        if len(body)>16384:
+            return
+        try:
+            value = json.loads(body)
+        except (ValueError,UnicodeError,TypeError):
+            return
+        if not isinstance(value,dict):
+            return
+        keys = sorted(key for key in value if isinstance(key,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,31}',key))[:8]
+        known = {
+            'captcha':'captcha','captcha_required':'captcha','challenge_required':'captcha','verify_human':'captcha',
+            'login_required':'login','sign_in_required':'login','signin_required':'login','authentication_required':'login',
+            'rate_limit':'rate_limit','rate_limited':'rate_limit','rate_limit_exceeded':'rate_limit','too_many_requests':'rate_limit',
+            'blocked':'blocked','access_denied':'blocked','ip_blocked':'blocked',
+            'expired':'token_invalid','token_expired':'token_invalid','invalid_token':'token_invalid','invalid_reply_token':'token_invalid',
+            'not_found':'unavailable','no_reply':'unavailable','reply_unavailable':'unavailable'}
+        code = 'unknown'
+        for key in ('code','error_code','error','errors','status','reason'):
+            candidate = value.get(key)
+            if isinstance(candidate,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,31}',candidate):
+                classified = known.get(candidate.lower().replace('-','_'))
+                if classified:
+                    code = classified
+                    break
+            elif type(candidate) is int and candidate in {401,403,429}:
+                code = {401:'login',403:'blocked',429:'rate_limit'}[candidate]
+                break
+        event('reply-response',at,error=('keys_'+'_'.join(keys))[:190],resource='code_'+code)
+
     async def fetch(traffic,request):
         at = time.monotonic()
         try:
@@ -223,6 +284,8 @@ def diagnostic(path):
             resource = request.resource_type if request.resource_type in {'document','script','stylesheet','xhr','fetch'} else 'other'
             event('fetch',at,host=host,resource=resource,
                   http_status=value[0] if type(value[0]) is int else None,bytes=len(value[2]))
+            if resource in {'xhr','fetch'}:
+                reply_json(value[2],at)
             return value
         except BaseException as error:
             # Network exceptions may embed request/response data. Class only.
@@ -233,7 +296,7 @@ def diagnostic(path):
     try:
         patch(helper._Traffic,'fetch',fetch)
         timed(helper,'_reveal','reveal')
-        timed(helper,'_click_one','click')
+        patch(helper,'_click_one',click)
         timed(helper,'_visible_email','visible-email')
         from playwright.async_api import BrowserType
         timed(BrowserType,'launch','browser-launch')

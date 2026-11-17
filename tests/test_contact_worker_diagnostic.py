@@ -101,6 +101,63 @@ class DiagnosticTests(unittest.TestCase):
         self.assertLessEqual(len(result['trace']['events']),32)
         self.assertLessEqual(len(json.dumps(result).encode()),7000)
 
+    def test_click_timeout_checks_only_known_public_dom_flags_without_disclosing_late_relay(self):
+        for relay_present,option_present in [(True,False),(False,True)]:
+            class Option:
+                def filter(option,**kwargs):
+                    self.assertEqual(kwargs['has_text'].pattern,r'^\s*email\s*$')
+                    return option
+                async def count(option):return int(option_present)
+            class Page:
+                def locator(page,selector):
+                    self.assertEqual(selector,'button.reply-option-header')
+                    return Option()
+            page=Page()
+            async def visible(value):
+                self.assertIs(value,page)
+                return RELAY if relay_present else None
+            async def failed_click(locator):raise TimeoutError('Locator.wait_for: Timeout 3000ms exceeded.')
+            async def reveal(unused,traffic,url):
+                await self.helper._click_one(types.SimpleNamespace(page=page))
+            self.helper._visible_email=visible
+            self.helper._click_one=failed_click
+            self.helper._reveal=reveal
+            value=self.run_diagnostic()
+            stages=[event['stage'] for event in value['trace']['events']]
+            self.assertIn('late-relay-present' if relay_present else 'late-relay-absent',stages)
+            self.assertIn('email-option-present' if option_present else 'email-option-absent',stages)
+            self.assertNotIn(RELAY,json.dumps(value))
+            self.assertEqual(value['trace']['result_status'],'unavailable')
+
+    def test_reply_json_records_identifier_keys_and_known_error_classifications_only(self):
+        for code,expected in [('CAPTCHA_REQUIRED','captcha'),('login-required','login'),('rate_limit_exceeded','rate_limit'),('PRIVATE_VALUE','unknown')]:
+            async def fetch(traffic,request):
+                return 200,{},json.dumps({'error_code':code,'message':'PRIVATE_POST_BODY '+RELAY,'reply':RELAY,'invalid-key PRIVATE':'PRIVATE_VALUE'}).encode()
+            async def reveal(page,traffic,url):
+                await traffic.fetch(types.SimpleNamespace(url=url+'?private=PRIVATE_QUERY',resource_type='xhr'))
+                return {'status':'unavailable','email':None}
+            self.helper._Traffic.fetch=fetch
+            self.helper._reveal=reveal
+            value=self.run_diagnostic()
+            event=next(event for event in value['trace']['events'] if event['stage']=='reply-response')
+            self.assertEqual(event['resource'],'code_'+expected)
+            self.assertEqual(event['error'],'keys_error_code_message_reply')
+            encoded=json.dumps(value)
+            for private in [RELAY,'PRIVATE_POST_BODY','PRIVATE_VALUE','PRIVATE_QUERY','invalid-key PRIVATE']:
+                self.assertNotIn(private,encoded)
+            self.assertTrue(all(set(item)<={'stage','elapsed_s','resource','host','http_status','bytes','error','message'} for item in value['trace']['events']))
+
+    def test_large_or_nonobject_json_response_is_not_inspected(self):
+        for body in [b'[]',b'{invalid',b'{"message":"'+b'x'*17000+b'"}']:
+            async def fetch(traffic,request):return 200,{},body
+            async def reveal(page,traffic,url):
+                await traffic.fetch(types.SimpleNamespace(url=url,resource_type='fetch'))
+                return {'status':'blocked','email':None}
+            self.helper._Traffic.fetch=fetch
+            self.helper._reveal=reveal
+            value=self.run_diagnostic()
+            self.assertNotIn('reply-response',[event['stage'] for event in value['trace']['events']])
+
     def test_only_canonical_script_job_path_is_allowed(self):
         other=self.directory/'other.json';other.write_text(self.job.read_text())
         with patch.object(worker,'__file__',str(self.directory/'contact_worker.py')):
