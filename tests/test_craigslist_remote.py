@@ -69,6 +69,18 @@ def test_bootstrap_is_an_internal_bound_purpose(client):
     assert client.post('/api/v1/in-hand/contact-lookup/issue', json={'listing_url': LISTING}).status_code == 404
 
 
+def test_diagnostic_claim_preserves_internal_purpose_and_bound_url_without_selectors(client):
+    issued = remote.issue_ticket(LISTING, purpose='diagnostic')
+    # A bearer may claim the stored authorization, never choose its URL/purpose.
+    assert client.post(CLAIM, json={'ticket': issued['ticket'], 'listing_url': OTHER,
+                                   'purpose': 'lookup'}).status_code == 401
+    response = client.post(CLAIM, json={'ticket': issued['ticket']})
+    assert response.status_code == 200
+    assert response.json() == {key: value for key, value in issued.items() if key != 'ticket'}
+    assert response.json()['purpose'] == 'diagnostic'
+    assert response.json()['listing_url'] == LISTING
+
+
 @pytest.mark.parametrize('url', ['https://example.test/item', 'https://www.craigslist.org/search/sss',
     'https://user:secret@www.craigslist.org/view/d/example/ExampleListingToken',
     'http://127.0.0.1/item', 'https://www.craigslist.org.evil.test/view/d/example/ExampleListingToken', None])
@@ -148,6 +160,19 @@ def test_rate_limit_counts_finished_attempts_for_the_entire_hour(store):
         assert db.execute('SELECT COUNT(*) FROM contact_tickets').fetchone()[0] == 30
     store['clock'][0] += remote.RATE_SECONDS + 1
     assert remote.issue_ticket(LISTING)['purpose'] == 'lookup'
+
+
+def test_diagnostic_and_lookup_share_the_same_hourly_budget():
+    for _ in range(remote.MAX_LOOKUPS_PER_HOUR - 1):
+        issued = remote.issue_ticket(LISTING)
+        remote.claim_ticket(issued['ticket'])
+        assert remote._finish_ticket(issued['ticket'])
+    diagnostic = remote.issue_ticket(LISTING, purpose='diagnostic')
+    assert remote.claim_ticket(diagnostic['ticket'])['purpose'] == 'diagnostic'
+    assert remote._finish_ticket(diagnostic['ticket'])
+    for purpose in ('lookup', 'diagnostic'):
+        with pytest.raises(remote.TicketBusy):
+            remote.issue_ticket(LISTING, purpose=purpose)
 
 
 def test_cleanup_deletes_only_a_bounded_old_batch(store):

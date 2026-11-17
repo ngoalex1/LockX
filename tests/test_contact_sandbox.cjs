@@ -141,6 +141,17 @@ test('bootstrap diagnostics redact connection URLs and credential-shaped values'
   assert.deepEqual(f.events,['claim']);
 });
 
+test('an internal diagnostic ticket follows the constrained browser path and excludes addresses and exception text',async()=>{
+  const {contactRequest}=await library;
+  const trace={result_status:'unavailable',relay_present:false,elapsed_s:7,events:[{stage:'fetch',host:'www.craigslist.org',resource:'document',error:'ConnectError',message:'never return seller@example.test'}]};
+  const f=fixture({claim:claim({purpose:'diagnostic'}),output:JSON.stringify({version:1,nonce:NONCE,url:URL,status:'diagnostic',trace})});
+  const answer=await contactRequest({ticket:TICKET},f.dependencies);
+  assert.equal(answer.code,200);assert.equal(answer.body.status,'diagnostic');assert.equal(answer.body.purpose,'diagnostic');
+  assert.equal(f.creates[0].source.snapshotId,SNAPSHOT);assert.deepEqual(f.creates[0].networkPolicy,{allow:['craigslist.org','*.craigslist.org']});
+  assert.ok(f.commands[0].args.includes('--diagnostic'));assert.ok(!JSON.stringify(answer.body).includes('seller@example.test'));
+  assert.deepEqual(f.events.slice(-2),['stop','delete']);
+});
+
 test('endpoint is POST JSON only, returns no CORS capability, and never reflects tickets',async()=>{
   const {createContactHandler}=await endpoint;
   for(const [method,type,body,status] of [['GET','application/json',{},405],['OPTIONS','application/json',{},405],['POST','text/plain',{ticket:TICKET},415],['POST','application/json','{bad',400]]){

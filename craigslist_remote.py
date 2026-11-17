@@ -99,7 +99,7 @@ def issue_ticket(url, purpose='lookup'):
     The public router exposes no mint or purpose-selection operation.
     """
     canonical = _canonical(url)
-    if purpose not in {'lookup', 'bootstrap'}:
+    if purpose not in {'lookup', 'bootstrap', 'diagnostic'}:
         raise ValueError('Invalid contact lookup purpose')
     now = int(time.time())
     ticket, nonce = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
@@ -112,7 +112,7 @@ def issue_ticket(url, purpose='lookup'):
             (now - RATE_SECONDS,))
         if db.execute("SELECT 1 FROM contact_tickets WHERE expires > ? AND state != 'finished' LIMIT 1", (now,)).fetchone():
             raise TicketBusy()
-        if purpose == 'lookup' and db.execute("SELECT COUNT(*) FROM contact_tickets WHERE purpose='lookup' AND created >= ?",
+        if purpose in {'lookup', 'diagnostic'} and db.execute("SELECT COUNT(*) FROM contact_tickets WHERE purpose IN ('lookup','diagnostic') AND created >= ?",
                 (now - RATE_SECONDS,)).fetchone()[0] >= MAX_LOOKUPS_PER_HOUR:
             raise TicketBusy()
         row = {'nonce': nonce, 'listing_url': canonical, 'purpose': purpose, 'expires': now + TICKET_SECONDS}

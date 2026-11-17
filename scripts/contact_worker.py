@@ -10,8 +10,10 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import types
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # These pure guards are copied verbatim from the API modules. The regression
 # suite compares their ASTs so changes cannot silently weaken this boundary.
@@ -141,6 +143,116 @@ def lookup(path):
             'status':status, 'email':email if status == 'revealed' else None}
 
 
+def _diagnostic_error(error):
+    name = type(error).__name__
+    if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}', name):
+        name = 'Error'
+    message = str(error).splitlines()[0][:500] if str(error) else 'Operation failed'
+    if (not re.match(r'^(?:BrowserType\.launch|Page\.goto|Locator\.(?:wait_for|click|count|is_visible|is_enabled|evaluate|get_attribute)|Timeout \d+ms exceeded|Target page|net::ERR_)',message)
+            or re.search(r'authorization|cookie|password|secret|post.?data|post.?body|headers?|fingerprint|[<>]', message, re.I)):
+        message = 'Operation failed'
+    message = re.sub(r'(?:https?|wss?|mailto):[^\s\x22\x27<>]+', '[url]', message, flags=re.I)
+    message = re.sub(r'[^\s<>\x22\x27]+@[^\s<>\x22\x27]+', '[email]', message)
+    message = re.sub(r'\S*[?&]\S*', '[query]', message)
+    message = re.sub(r'[A-Za-z0-9_-]{24,}', '[redacted]', message)
+    message = re.sub(r'[\x00-\x1f\x7f]', ' ', message)
+    return {'error':name, 'message':message[:120]}
+
+
+def diagnostic(path):
+    """Operator-only timing trace; no relay address or page content is returned."""
+    expected = Path(__file__).resolve().with_name('job.json')
+    if Path(path).resolve() != expected or expected.is_symlink():
+        raise ValueError('Invalid diagnostic job path')
+    raw = expected.read_bytes()
+    if len(raw) > 8192:
+        raise ValueError('Oversized job')
+    job = json.loads(raw)
+    if (not isinstance(job,dict) or set(job) != {'version','nonce','listing_url'}
+            or type(job.get('version')) is not int or job['version'] != 1
+            or not isinstance(job.get('nonce'),str)
+            or not re.fullmatch(r'[A-Za-z0-9_-]{43}',job['nonce'])):
+        raise ValueError('Invalid job')
+    install_guards()
+    os.environ['LOCKX_CRAIGSLIST_CONTACT_MODE'] = 'local'
+    os.environ.pop('LOCKX_LISTING_BROWSER_EXECUTABLE',None)
+    import craigslist_contact as helper
+    if not helper.is_craigslist_listing_url(job.get('listing_url')):
+        raise ValueError('Invalid listing')
+    started = time.monotonic()
+    events, patches = [], []
+    output = {'version':1,'nonce':job['nonce'],'url':job['listing_url'],'status':'diagnostic'}
+    budget = max(0,6000-len(json.dumps(output).encode()))
+    used = 0
+
+    def event(stage,at,**fields):
+        nonlocal used
+        value = {'stage':stage,'elapsed_s':round(time.monotonic()-at,3),**fields}
+        size = len(json.dumps(value,separators=(',',':')).encode())+1
+        if len(events)<32 and used+size<=budget:
+            events.append(value)
+            used += size
+
+    def patch(owner,name,replacement):
+        original = getattr(owner,name)
+        patches.append((owner,name,original))
+        setattr(owner,name,replacement)
+        return original
+
+    def timed(owner,name,stage):
+        original = getattr(owner,name)
+        async def wrapped(*args,**kwargs):
+            at = time.monotonic()
+            try:
+                value = await original(*args,**kwargs)
+                # Never include a returned mailbox, locator, browser or page.
+                event(stage,at)
+                return value
+            except BaseException as error:
+                event(stage,at,**_diagnostic_error(error))
+                raise
+        patch(owner,name,wrapped)
+
+    original_fetch = helper._Traffic.fetch
+    async def fetch(traffic,request):
+        at = time.monotonic()
+        try:
+            value = await original_fetch(traffic,request)
+            host = urlsplit(request.url).hostname or ''
+            host = host.lower() if re.fullmatch(r'(?:[a-z0-9-]+\.)*craigslist\.org',host.lower()) else '[other]'
+            resource = request.resource_type if request.resource_type in {'document','script','stylesheet','xhr','fetch'} else 'other'
+            event('fetch',at,host=host,resource=resource,
+                  http_status=value[0] if type(value[0]) is int else None,bytes=len(value[2]))
+            return value
+        except BaseException as error:
+            # Network exceptions may embed request/response data. Class only.
+            event('fetch',at,error=_diagnostic_error(error)['error'])
+            raise
+
+    result = {'status':'unavailable','email':None}
+    try:
+        patch(helper._Traffic,'fetch',fetch)
+        timed(helper,'_reveal','reveal')
+        timed(helper,'_click_one','click')
+        timed(helper,'_visible_email','visible-email')
+        from playwright.async_api import BrowserType
+        timed(BrowserType,'launch','browser-launch')
+        result = asyncio.run(helper.reveal_craigslist_contact(job['listing_url']))
+    except BaseException as error:
+        event('worker',started,**_diagnostic_error(error))
+    finally:
+        for owner,name,original in reversed(patches):
+            setattr(owner,name,original)
+    status = result.get('status') if isinstance(result,dict) else 'unavailable'
+    if status not in {'revealed','unavailable','blocked','busy'}:
+        status = 'unavailable'
+    email = clean_email(result.get('email')) if isinstance(result,dict) else None
+    output['trace'] = {'result_status':status,
+        'relay_present':bool(status=='revealed' and email and email.rsplit('@',1)[-1]=='sale.craigslist.org'),
+        'elapsed_s':round(time.monotonic()-started,3),'events':events}
+    return output
+
+
 def main():
     # Only this process's one bounded JSON result reaches stdout. Browser/driver
     # messages and traces are never part of the public worker protocol.
@@ -150,10 +262,12 @@ def main():
                 result = probe()
             elif len(sys.argv) == 2 and sys.argv[1] == str(Path(__file__).resolve().with_name('job.json')):
                 result = lookup(sys.argv[1])
+            elif len(sys.argv) == 3 and sys.argv[1] == '--diagnostic':
+                result = diagnostic(sys.argv[2])
             else:
                 raise ValueError('Invalid worker arguments')
         encoded = json.dumps(result, separators=(',',':'))
-        if len(encoded.encode()) > 4096:
+        if len(encoded.encode()) > (7000 if result.get('status')=='diagnostic' else 4096):
             raise ValueError('Oversized result')
         print(encoded, flush=True)
         return 0
