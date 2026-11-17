@@ -264,7 +264,9 @@ def diagnostic(path):
             'not_found':'unavailable','no_reply':'unavailable','reply_unavailable':'unavailable'}
         code = 'unknown'
         captcha = value.get('hCaptcha')
-        if captcha is True:
+        if isinstance(value.get('siteKey_hCaptcha'),str) and value['siteKey_hCaptcha']:
+            code = 'captcha_configured'
+        elif captcha is True:
             code = 'captcha'
         elif captcha is False:
             code = 'captcha_disabled'

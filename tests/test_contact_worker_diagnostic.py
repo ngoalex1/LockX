@@ -175,6 +175,21 @@ class DiagnosticTests(unittest.TestCase):
                 self.assertNotIn('PRIVATE_NONCE',json.dumps(value))
                 self.assertNotIn('PRIVATE_SITE_KEY',json.dumps(value))
 
+    def test_official_sitekey_hcaptcha_configuration_is_classified_without_exposing_its_value(self):
+        async def fetch(traffic,request):
+            return 200,{},json.dumps({'nonce':'PRIVATE_NONCE','siteKey_hCaptcha':'PRIVATE_SITE_KEY'}).encode()
+        async def reveal(page,traffic,url):
+            await traffic.fetch(types.SimpleNamespace(url=url,resource_type='xhr'))
+            return {'status':'unavailable','email':None}
+        self.helper._Traffic.fetch=fetch
+        self.helper._reveal=reveal
+        value=self.run_diagnostic()
+        event=next(event for event in value['trace']['events'] if event['stage']=='reply-response')
+        self.assertEqual(event['resource'],'code_captcha_configured')
+        self.assertEqual(event['error'],'keys_nonce_siteKey_hCaptcha')
+        self.assertNotIn('PRIVATE_NONCE',json.dumps(value))
+        self.assertNotIn('PRIVATE_SITE_KEY',json.dumps(value))
+
     def test_only_canonical_script_job_path_is_allowed(self):
         other=self.directory/'other.json';other.write_text(self.job.read_text())
         with patch.object(worker,'__file__',str(self.directory/'contact_worker.py')):
