@@ -132,10 +132,18 @@ def current_user(authorization: str | None = Header(default=None, alias="Authori
 def serialize_case(row):
     return {"id": row["id"], "case_number": row["case_number"], "brand": row["brand"], "model": row.get("model") or "Unknown model", "reference": row.get("reference_number"), "serial_number": row.get("serial_number"), "distinctive_details": row.get("distinctive_marks"), "status": "paused" if row.get("status") == "paused" else "monitoring", "created_at": row["created_at"]}
 
+def validate_recovery_id(value):
+    try:
+        UUID(str(value))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(422, "Invalid recovery identifier") from exc
+
 def assert_case_owner(case_id, owner_id):
+    validate_recovery_id(case_id)
     if not supabase_request("GET", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}&select=id").json(): raise HTTPException(404, "Recovery case not found")
 
 def owned_case_row(case_id, owner_id):
+    validate_recovery_id(case_id)
     rows = supabase_request("GET", f"watch_cases?id=eq.{case_id}&owner_id=eq.{owner_id}&select=id,brand,model,reference_number,serial_number,distinctive_marks").json()
     if not rows: raise HTTPException(404, "Recovery case not found")
     return rows[0]
@@ -283,6 +291,7 @@ def list_case_photos(case_id: str, owner_id=Depends(current_user)):
 
 @app.post("/api/v1/cases/{case_id}/photos/{photo_id}/delete", status_code=204)
 def delete_photo(case_id: str, photo_id: str, owner_id=Depends(current_user)):
+    validate_recovery_id(photo_id)
     assert_case_owner(case_id, owner_id)
     photos = supabase_request("GET", f"case_photos?id=eq.{photo_id}&case_id=eq.{case_id}&select=id,storage_path").json()
     if not photos:
