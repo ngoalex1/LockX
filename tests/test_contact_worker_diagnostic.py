@@ -158,6 +158,23 @@ class DiagnosticTests(unittest.TestCase):
             value=self.run_diagnostic()
             self.assertNotIn('reply-response',[event['stage'] for event in value['trace']['events']])
 
+    def test_hcaptcha_boolean_classification_never_exposes_configuration_values(self):
+        for enabled,expected in [(True,'captcha'),(False,'captcha_disabled')]:
+            with self.subTest(hCaptcha=enabled):
+                async def fetch(traffic,request):
+                    return 200,{},json.dumps({'nonce':'PRIVATE_NONCE','siteKey':'PRIVATE_SITE_KEY','hCaptcha':enabled}).encode()
+                async def reveal(page,traffic,url):
+                    await traffic.fetch(types.SimpleNamespace(url=url,resource_type='xhr'))
+                    return {'status':'blocked','email':None}
+                self.helper._Traffic.fetch=fetch
+                self.helper._reveal=reveal
+                value=self.run_diagnostic()
+                event=next(event for event in value['trace']['events'] if event['stage']=='reply-response')
+                self.assertEqual(event['resource'],'code_'+expected)
+                self.assertEqual(event['error'],'keys_hCaptcha_nonce_siteKey')
+                self.assertNotIn('PRIVATE_NONCE',json.dumps(value))
+                self.assertNotIn('PRIVATE_SITE_KEY',json.dumps(value))
+
     def test_only_canonical_script_job_path_is_allowed(self):
         other=self.directory/'other.json';other.write_text(self.job.read_text())
         with patch.object(worker,'__file__',str(self.directory/'contact_worker.py')):

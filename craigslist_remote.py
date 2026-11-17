@@ -23,7 +23,7 @@ import httpx
 from starlette.concurrency import run_in_threadpool
 
 REMOTE_ENDPOINT = 'https://lockx.ai/api/craigslist-contact'
-REMOTE_SECONDS = 10
+REMOTE_SECONDS = 12
 MAX_RESPONSE_BYTES = 8 * 1024
 MAX_CLAIM_BYTES = 512
 TICKET_SECONDS = 60
@@ -237,7 +237,7 @@ async def reveal_remote_craigslist_contact(url):
             expected = issue_ticket(canonical)
             ticket = expected['ticket']
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
-                    timeout=httpx.Timeout(8, connect=2, pool=1),
+                    timeout=httpx.Timeout(10, connect=2, pool=1),
                     headers={'Accept': 'application/json', 'Accept-Encoding': 'identity'}) as client:
                 async with client.stream('POST', REMOTE_ENDPOINT, json={'ticket': ticket}) as response:
                     if response.status_code != 200:

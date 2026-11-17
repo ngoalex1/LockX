@@ -12,7 +12,7 @@ The original `craigslist_contact.py` browser and pinned public-IP transport rema
 
 Only server code can mint a 256-bit one-use lookup ticket. The API stores its hash and atomically consumes it at the fixed claim endpoint. Its binding includes the canonical URL, independent nonce, purpose, and 60-second expiry. Neither the public function nor the claim endpoint accepts a caller-selected URL or browser options. The API validates the entire bound result and requires a single valid Craigslist relay.
 
-One lookup can be in flight. Initial admission is limited to 30 fresh attempts per hour. Errors or uncertain termination retain the lease until expiry. A normal contact failure preserves imported photos and does not use a verification credit.
+One lookup can be in flight. Initial admission is limited to 30 fresh attempts per hour. The remote call has a 12-second overall deadline and a 10-second HTTP read limit, within the existing 14-second listing import budget. Errors or uncertain termination retain the lease until expiry. A normal contact failure preserves imported photos and does not use a verification credit.
 
 Existing pending buyer requests can also refresh a missing contact while loading their private email draft. This requires remote mode, a pending/sendable draft, no existing contact, and no previous email attempt. Database access is closed before network work and the current recipient/state is rechecked afterward. A bounded short cache consolidates repeated reads. Refresh affects only the draft response: original photo provenance and imported timestamps remain unchanged.
 

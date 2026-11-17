@@ -263,7 +263,16 @@ def diagnostic(path):
             'expired':'token_invalid','token_expired':'token_invalid','invalid_token':'token_invalid','invalid_reply_token':'token_invalid',
             'not_found':'unavailable','no_reply':'unavailable','reply_unavailable':'unavailable'}
         code = 'unknown'
+        captcha = value.get('hCaptcha')
+        if captcha is True:
+            code = 'captcha'
+        elif captcha is False:
+            code = 'captcha_disabled'
+        elif isinstance(captcha,(str,dict)) and captcha:
+            code = 'captcha_configured'
         for key in ('code','error_code','error','errors','status','reason'):
+            if code != 'unknown':
+                break
             candidate = value.get(key)
             if isinstance(candidate,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,31}',candidate):
                 classified = known.get(candidate.lower().replace('-','_'))

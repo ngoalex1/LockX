@@ -90,10 +90,14 @@ def network(monkeypatch):
     return state
 
 
-def request(url=LISTING, *, resource='document', method='GET', body=None, page=None):
+def request(url=LISTING, *, resource='document', method='GET', body=None, page=None,
+            headers=None, actual_headers=None):
+    provisional = headers if headers is not None else {'user-agent': 'TestBrowser', 'authorization': 'secret',
+            'proxy-authorization': 'secret', 'cookie': 'anonymous_visit=1'}
+    async def all_headers():
+        return actual_headers if actual_headers is not None else provisional
     return SimpleNamespace(url=url, method=method, post_data_buffer=body,
-        resource_type=resource, headers={'user-agent': 'TestBrowser', 'authorization': 'secret',
-            'proxy-authorization': 'secret', 'cookie': 'anonymous_visit=1'},
+        resource_type=resource, headers=provisional, all_headers=all_headers,
         frame=SimpleNamespace(page=page, parent_frame=None))
 
 
@@ -116,6 +120,45 @@ def test_every_connection_is_pinned_and_authorization_is_never_forwarded(network
     assert all(item['trust_env'] is False for item in network['transports'])
 
 
+def test_actual_anonymous_cookie_is_forwarded_when_provisional_headers_omit_it(network):
+    network['routes'][('www.craigslist.org', '/view/d/example-listing/ExampleListingToken')] = (
+        200, {'content-type': 'text/html'}, b'public listing')
+    observed = request(headers={'user-agent': 'TestBrowser'}, actual_headers={
+        'user-agent': 'TestBrowser', 'cookie': 'anonymous_visit=1; public_reply_session=fixture',
+        'authorization': 'Bearer never-forward', 'proxy-authorization': 'never-forward',
+        'x-service-secret': 'never-forward',
+    })
+    assert 'cookie' not in observed.headers
+    run(traffic().fetch(observed))
+    outbound, = network['requests']
+    assert outbound.headers['cookie'] == 'anonymous_visit=1; public_reply_session=fixture'
+    assert 'authorization' not in outbound.headers and 'proxy-authorization' not in outbound.headers
+    assert 'x-service-secret' not in outbound.headers
+
+
+def test_actual_forwarded_header_values_keep_the_existing_length_cap(network):
+    network['routes'][('www.craigslist.org', '/view/d/example-listing/ExampleListingToken')] = (
+        200, {'content-type': 'text/html'}, b'public listing')
+    run(traffic().fetch(request(headers={}, actual_headers={
+        'cookie': 'x' * 4097, 'user-agent': 'x' * 4097, 'x-requested-with': 'x' * 4097,
+        'accept-language': 'x' * 4096,
+    })))
+    outbound, = network['requests']
+    assert 'cookie' not in outbound.headers and 'user-agent' not in outbound.headers
+    assert 'x-requested-with' not in outbound.headers
+    assert outbound.headers['accept-language'] == 'x' * 4096
+
+
+def test_distinct_set_cookie_headers_preserve_expires_commas_for_browser_fulfillment(network):
+    first = 'anonymous_visit=fixture; Path=/; Secure; HttpOnly; Expires=Wed, 09 Jun 2027 10:18:14 GMT'
+    second = 'public_reply_session=fixture; Domain=.craigslist.org; Path=/; Secure; SameSite=Lax'
+    network['routes'][('www.craigslist.org', '/view/d/example-listing/ExampleListingToken')] = (
+        200, [('content-type', 'text/html'), ('set-cookie', first), ('set-cookie', second)], b'listing')
+    _, headers, _ = run(traffic().fetch(request()))
+    assert headers['set-cookie'] == first + '\n' + second
+    assert headers['set-cookie'].split('\n') == [first, second]
+
+
 @pytest.mark.parametrize('target', [
     'https://evil.test/secret', 'https://www.craigslist.org.evil.test/secret',
     'http://www.craigslist.org/secret', 'http://169.254.169.254/secret',
@@ -135,11 +178,29 @@ def test_each_redirect_is_validated_and_pinned_before_final_fulfillment(network)
         302, {'location': 'https://sfbay.craigslist.org/pho/d/example/1234567890.html'}, b'')
     network['routes'][('sfbay.craigslist.org', '/pho/d/example/1234567890.html')] = (
         200, {'content-type': 'text/html'}, b'final')
-    status, _, body = run(traffic().fetch(request()))
+    status, _, body = run(traffic().fetch(request(headers={'user-agent': 'TestBrowser'}, actual_headers={
+        'cookie': 'anonymous_visit=1', 'origin': 'https://www.craigslist.org', 'referer': LISTING})))
     assert status == 200 and body == b'final'
     assert len(network['requests']) == 2
     assert all(item.url.host == PUBLIC_IP for item in network['requests'])
     assert 'cookie' not in network['requests'][1].headers
+    assert 'origin' not in network['requests'][1].headers and 'referer' not in network['requests'][1].headers
+
+
+def test_same_host_redirect_keeps_only_the_allowed_anonymous_headers(network):
+    network['routes'][('www.craigslist.org', '/first-script.js')] = (
+        302, {'location': '/final-script.js'}, b'')
+    network['routes'][('www.craigslist.org', '/final-script.js')] = (
+        200, {'content-type': 'application/javascript'}, b'void 0;')
+    run(traffic().fetch(request('https://www.craigslist.org/first-script.js', resource='script',
+        headers={}, actual_headers={'cookie': 'anonymous_visit=1', 'origin': 'https://www.craigslist.org',
+            'referer': LISTING, 'authorization': 'never-forward'})))
+    assert len(network['requests']) == 2
+    for outbound in network['requests']:
+        assert outbound.headers['cookie'] == 'anonymous_visit=1'
+        assert outbound.headers['origin'] == 'https://www.craigslist.org'
+        assert outbound.headers['referer'] == LISTING
+        assert 'authorization' not in outbound.headers
 
 
 def test_dns_mixed_with_private_address_never_connects(network):

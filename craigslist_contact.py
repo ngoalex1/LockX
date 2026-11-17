@@ -109,7 +109,7 @@ class _Traffic:
         body = request.post_data_buffer or b''
         if len(body) > MAX_REQUEST_BYTES:
             raise _Unavailable()
-        observed = request.headers
+        observed = await request.all_headers()
         # No credentials or ambient proxy settings. Cookies can only come from
         # this newly-created context and are discarded with it after this visit.
         headers = {'Accept-Encoding': 'gzip, deflate'}
@@ -212,7 +212,12 @@ class _Traffic:
                         # later redirect hops. Every hop above used a pinned IP.
                         response_headers = {key: value for key, value in response.headers.items()
                             if key.lower() not in {'content-encoding', 'content-length', 'transfer-encoding',
-                                                   'connection', 'alt-svc', 'location', 'refresh'}}
+                                                   'connection', 'alt-svc', 'location', 'refresh', 'set-cookie'}}
+                        cookies = response.headers.get_list('set-cookie')
+                        if cookies:
+                            # Playwright splits this header on newlines before
+                            # fulfillment. Commas belong inside Expires dates.
+                            response_headers['set-cookie'] = '\n'.join(cookies)
                         return status, response_headers, bytes(output)
                     finally:
                         await response.aclose()
