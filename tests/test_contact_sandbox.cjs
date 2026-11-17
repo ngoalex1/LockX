@@ -109,7 +109,7 @@ test('upload, command, and stop failures still attempt deletion and expose no in
 test('bootstrap performs only fixed dependency setup and a deny-network sandbox probe before a clean snapshot',async()=>{
   const {contactRequest}=await library;const f=fixture({claim:claim({purpose:'bootstrap'})});
   const answer=await contactRequest({ticket:TICKET},f.dependencies);assert.equal(answer.code,200);assert.deepEqual(answer.body,{...claim({purpose:'bootstrap'}),status:'ready',snapshot_id:SNAPSHOT,id:'sbx_fixture'});
-  assert.deepEqual(f.creates[0],{persistent:false,resources:{vcpus:1},env:{},ports:[],timeout:180000,networkPolicy:'allow-all'});
+  assert.deepEqual(f.creates[0],{persistent:false,resources:{vcpus:1},env:{},ports:[],timeout:180000,image:'vcr.vercel.com/vercel/sandbox/universal:latest',networkPolicy:'allow-all'});
   assert.ok(f.commands.some(command=>command.args.includes('playwright==1.64.0')));assert.ok(f.commands.some(command=>command.sudo&&command.args.join(' ')==='-m playwright install --with-deps chromium'));
   assert.ok(f.events.indexOf('network:deny-all')<f.events.indexOf('command:/vercel/sandbox/contact-venv/bin/python',f.events.indexOf('network:deny-all')));
   assert.ok(f.commands.some(command=>command.args.includes('--probe')&&!command.sudo));assert.deepEqual(f.commands.at(-1).args,['-rf','/vercel/sandbox/lockx-contact']);assert.ok(f.events.indexOf('command:rm')<f.events.indexOf('snapshot'));
@@ -121,6 +121,16 @@ test('a failed Chromium or user namespace probe never snapshots the bootstrap VM
   for(const probe of [{version:1,status:'unavailable',sandbox:false,userns:true},{version:1,status:'ready',sandbox:true,userns:false}]){
     const f=fixture({claim:claim({purpose:'bootstrap'}),probe});const answer=await contactRequest({ticket:TICKET},f.dependencies);assert.equal(answer.code,503);assert.equal(answer.body.stage,'sandbox-probe');assert.ok(!f.events.includes('snapshot'));assert.deepEqual(f.events.slice(-2),['stop','delete']);
   }
+});
+
+test('bootstrap diagnostics redact connection URLs and credential-shaped values',async()=>{
+  const {contactRequest}=await library;const f=fixture({claim:claim({purpose:'bootstrap'})});
+  const secret='sensitive'.repeat(10);
+  f.dependencies.loadSandbox=async()=>{throw Error('Request failed https://provider.example/?token='+secret+' Bearer '+secret);};
+  const answer=await contactRequest({ticket:TICKET},f.dependencies);
+  assert.equal(answer.code,503);assert.equal(answer.body.stage,'sdk');
+  assert.ok(!JSON.stringify(answer).includes(secret));assert.ok(!JSON.stringify(answer).includes('provider.example'));
+  assert.deepEqual(f.events,['claim']);
 });
 
 test('endpoint is POST JSON only, returns no CORS capability, and never reflects tickets',async()=>{
