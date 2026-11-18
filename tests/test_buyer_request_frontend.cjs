@@ -54,16 +54,16 @@ function harness(options={}) {
     querySelector(selector){return nodes.get(selector)||null;}
     querySelectorAll(selector){return selector==='input,select,[data-remove],[data-select],#ihChoosePhotos,#ihLoadListingPhotos'?['#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihChoosePhotos','#ihLoadListingPhotos'].map(id=>nodes.get(id)):[];}
   }
-  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerMessageReview','#ihMarketplaceCopyStatus','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence'])nodes.set(id,new Element());
+  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerMessageReview','#ihMarketplaceCopyStatus','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence','#ihRetryCapture','#ihRetryCaptureConsent','#ihQualityRetryError','#ihRetryAnalysis','#ihRetrySelectionLabel'])nodes.set(id,new Element());
   nodes.get('#ihRequestForm').dataset.buyer='true';nodes.get('#ihBuyerCaptureMode').value='handheld';nodes.get('#ihBuyerTitle').value='Listing camera';nodes.get('#ihListingURL').value='https://market.example/items/123';
-  const document={body:new Element(),hidden:false,readyState:'loading',querySelector:selector=>nodes.get(selector)||null,querySelectorAll:()=>[],createElement:()=>new Element(),addEventListener(){}};
+  const document={body:new Element(),hidden:false,readyState:'loading',querySelector:selector=>nodes.get(selector)||null,querySelectorAll:selector=>[...nodes.values()].filter(node=>selector==='[data-retry-photo-index]'?node.dataset?.retryPhotoIndex!==undefined:selector==='[data-retry-this-photo]'?node.dataset?.retryThisPhoto!==undefined:selector==='[data-retry-all-failed]'?node.dataset?.retryAllFailed!==undefined:false),createElement:()=>new Element(),addEventListener(){}};
   const stream={getTracks:()=>[{stop(){}}],getVideoTracks:()=>[{stop(){}}]};
   class Recorder {static isTypeSupported(){return true;}constructor(){this.state='inactive';}start(){this.state='recording';calls.recording++;}}
   const window={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:{stopRecorder(){}},innerHeight:800,innerWidth:400,speechSynthesis:{},matchMedia:()=>({matches:true}),scrollTo(){},addEventListener:(name,fn)=>events[name]=fn,LockXCredits:{authorization:async()=>options.noAuthorization?'':'Bearer fake-owner',ensureForVerification:async()=>{calls.ensure++;await options.ensure?.();},refresh:()=>{calls.refresh++;},decorate(){}}};
   const navigator={userAgent:'iPhone',clipboard:{writeText:async text=>{if(options.clipboardFail)throw Error('Clipboard unavailable');await options.clipboardWrite?.(text);calls.clipboard.push(text);}},mediaDevices:{getUserMedia:async()=>{calls.camera++;return stream;}}};
   if(options.share)navigator.share=async data=>{calls.shares.push(data);if(options.shareFail)throw Error('Share unavailable');};
   const context={window,document,navigator,API_BASE:'https://api.example/v1',location:{hash:'#other',origin:'https://lockx.example',pathname:'/',assign:url=>calls.navigation.push(url)},URL,URLSearchParams,Headers,Blob,Uint8Array,atob,FormData:FormDataFake,AbortController,Date,Intl,JSON,Promise,Map,Set,Number,Math,Error,crypto:webcrypto,MediaRecorder:Recorder,performance:{now:()=>100},btoa:value=>Buffer.from(value,'binary').toString('base64'),localStorage:{getItem:()=>null,setItem(){}},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id),setInterval:()=>999,clearInterval(){},go(){},toast(){},fetch:async(url,init={})=>{requests.push({url,init});if(url.endsWith('/capabilities'))return response({visual_comparison_ready:true,buyer_requests:true,listing_photo_import:true});return options.fetch?options.fetch(url,init):response(record());}};
-  let code=source.replace(/\}\)\(\);\s*$/,`window.testBuyer={page,showBuyer,loadListingPhotos,scheduleListingImport,addPhotos,renderPhotos,createRequest,buyerMessage,buyerRequestBox,bindBuyerRequest,copyBuyerMessage,safeListingURL,sourceLink,reportFingerprint,pollReport,showReport,showSeller,showPublic,startCapture,route,loadSellerEmail,sellerEmailState,preparedEmailURL,safeSellerEmail,setManagementKey(value){managementKey=value;},setCapabilities(value){capabilities=value;},setPhotos(value){photos=value;},getPhotos(){return photos;},getAttempt(){return buyerAttempt;},setCompressor(fn){compressPhoto=fn;},setRoute(value){routeNumber=value;},setupCapture(record){document.querySelector('#ihSellerConsent').checked=true;sellerData=record;sellerToken='capture-token';routeNumber=1;isStandalone=true;location.hash='#in-hand/capture/capture-token';browserAccess.records[record.id]='${managementKey}';prepareCaptureLocation=async()=>false;renderCamera=()=>{document.querySelector('#ihShareEvidence').checked=false;};positionReticle=()=>{};requestCaptureLocation=()=>{};renderUploadStatus=()=>{};updateCameraFeedback=()=>{};pumpChunks=()=>{};speak=()=>{};}};})();`);
+  let code=source.replace(/\}\)\(\);\s*$/,`window.testBuyer={page,showBuyer,loadListingPhotos,scheduleListingImport,addPhotos,renderPhotos,createRequest,buyerMessage,buyerRequestBox,bindBuyerRequest,copyBuyerMessage,safeListingURL,sourceLink,reportFingerprint,pollReport,showReport,showSeller,showSellerResult,showPublic,startCapture,route,loadSellerEmail,sellerEmailState,preparedEmailURL,safeSellerEmail,captureRetryState,rootPhotoIndex,rootRetryPolicy,rootPhotoRetryPanel,retrySelection,setRetrySelection,captureNavigation,captureAttemptLabel,captureRetryBox,captureAttemptHistory,bindCaptureRetry,captureGuidance,watchCaptureAttempts,photoResultCards,photoMatchPercentage,photoMatchScope,processingActivity,publicationBox,managementBox,setManagementKey(value){managementKey=value;},setCapabilities(value){capabilities=value;},setPhotos(value){photos=value;},getPhotos(){return photos;},getAttempt(){return buyerAttempt;},setCompressor(fn){compressPhoto=fn;},setRoute(value){routeNumber=value;},setupCapture(record){document.querySelector('#ihSellerConsent').checked=true;sellerData=record;sellerToken='capture-token';routeNumber=1;isStandalone=true;location.hash='#in-hand/capture/capture-token';browserAccess.records[record.id]='${managementKey}';prepareCaptureLocation=async()=>false;renderCamera=()=>{document.querySelector('#ihShareEvidence').checked=false;};positionReticle=()=>{};requestCaptureLocation=()=>{};renderUploadStatus=()=>{};updateCameraFeedback=()=>{};pumpChunks=()=>{};speak=()=>{};}};})();`);
   vm.createContext(context);vm.runInContext(code,context);
   return {api:window.testBuyer,nodes,requests,timers,calls,context,events};
 }
@@ -455,4 +455,205 @@ test('attempted emails never offer a mail-app duplicate and a provider cooldown 
   }
   const h=harness({fetch:async(_url,init)=>response(emailDraft({status:init.method==='POST'?'accepted':'draft',recipient_locked:true,send_ready:false,retry_after:init.method==='POST'?0:60}))});await flush();await h.api.loadSellerEmail(record(),1);assert.match(h.nodes.get('#ihSellerEmail').innerHTML,/Retry available shortly/);assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,true);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
   await runTimer(h,60000);assert.equal(h.nodes.get('#ihSendSellerEmail').disabled,false);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);await h.nodes.get('#ihSendSellerEmail').onclick();assert.equal(h.requests.filter(request=>request.init.method==='POST').length,1);assert.equal(h.calls.ensure,0);
+});
+
+const attemptRecord=(number=1,extra={})=>({id:'attempt-'+number,token:'t'.repeat(43),status:'inconclusive',analysis_status:'complete',publication_status:'not_eligible',media:[],photos:[{photo_index:0,finding:'not_established',evidence:'Printed number unreadable.'}],identifier_checks:[],eligible_photo_indices:[],verified_count:0,total_count:1,summary:'More evidence is needed.',capture_mode:'handheld',capture_retry:{attempt_number:number,max_attempts:3,remaining_attempts:3-number,allowed:number<3,action:number<3?'create':'none',next_attempt_number:number<3?number+1:null,light_assist_reason:null,blocked_reason:number===3?'limit_reached':null},...extra});
+
+test('server-counted attempts show one of three, two of three and exhausted three without a fourth recording CTA',()=>{
+  const h=harness();
+  for(const number of [1,2,3]){
+    const data=attemptRecord(number),caption=h.api.captureAttemptLabel(data),html=h.api.captureRetryBox(data);
+    assert.match(caption,new RegExp(`Attempt ${number} of 3`));
+    if(number<3){assert.match(html,new RegExp(`Try again \\(${3-number} attempt${number===1?'s':''} left\\)`));assert.match(html,/no additional credit/);assert.match(html,/same original photos/);assert.match(html,/id="ihRetryCaptureConsent"/);assert.doesNotMatch(html,/id="ihRetryCaptureConsent"[^>]*checked/);}
+    else {assert.match(html,/All 3 attempts have been used/);assert.doesNotMatch(html,/ihRetryCapture|Try again|attempt 4|Record another/);}
+  }
+});
+
+test('invalid attempt metadata cannot offer a new recording or invent a count',()=>{
+  const h=harness(),base=attemptRecord();
+  for(const change of [{max_attempts:4},{attempt_number:0},{attempt_number:4},{attempt_number:1.5},{attempt_number:'1'},{remaining_attempts:-1},{remaining_attempts:3},{remaining_attempts:'2'},{allowed:'yes'}]){
+    const data={...base,capture_retry:{...base.capture_retry,...change}};
+    assert.equal(h.api.captureRetryState(data),null);assert.equal(h.api.captureAttemptLabel(data),'');assert.equal(h.api.captureRetryBox(data),'');
+  }
+  for(const change of [{allowed:false},{action:'unknown'},{remaining_attempts:0},{next_attempt_number:4},{next_attempt_number:1}])assert.doesNotMatch(h.api.captureRetryBox({...base,capture_retry:{...base.capture_retry,...change}}),/id="ihRetryCapture"/);
+  assert.equal(h.api.captureRetryBox({...base,capture_retry:null}),'');
+});
+
+test('server-denied, unfinished, technical and withdrawn checks do not offer a fresh capture; partial matches stay independent',()=>{
+  const h=harness(),base=attemptRecord();
+  for(const change of [{status:'processing'},{status:'waiting'},{status:'confirmed'},{analysis_status:'failed'},{analysis_status:'unavailable'},{publication_status:'withdrawn'},{capture_retry:{...base.capture_retry,allowed:false,action:'none'}}])assert.doesNotMatch(h.api.captureRetryBox({...base,...change}),/id="ihRetryCapture"/);
+  const partial=attemptRecord(1,{status:'mismatch',verified_count:1,total_count:2,eligible_photo_indices:[0],publication_status:'ready',publication:{id:'historical-proof'}});
+  const html=h.api.captureRetryBox(partial);assert.match(html,/Try again \(2 attempts left\)/);assert.match(html,/individual results stay saved/);assert.equal(partial.publication.id,'historical-proof');
+});
+
+test('resuming a saved child works at zero remaining slots and requests no new recording consent',()=>{
+  const h=harness(),data=attemptRecord(2);data.capture_retry={...data.capture_retry,remaining_attempts:0,allowed:true,action:'resume',next_attempt_number:3};
+  const html=h.api.captureRetryBox(data);assert.match(html,/Continue attempt 3 of 3/);assert.match(html,/without creating another recording slot/);assert.doesNotMatch(html,/ihRetryCaptureConsent|Try again \(0|light turns on|no additional credit/);
+});
+
+test('new recording requires a fresh explicit consent and double clicks submit exactly once without a credit preflight',async()=>{
+  let finish;
+  const h=harness({fetch:async(_url,init)=>init.method==='POST'?new Promise(resolve=>finish=resolve):response(attemptRecord())});await flush();h.api.setRoute(1);h.api.bindCaptureRetry('t'.repeat(43),1);
+  await h.nodes.get('#ihRetryCapture').onclick();assert.match(h.nodes.get('#ihQualityRetryError').textContent,/agree to the new recording/);assert.equal(h.requests.filter(r=>r.init.method==='POST').length,0);
+  h.nodes.get('#ihRetryCaptureConsent').checked=true;
+  const first=h.nodes.get('#ihRetryCapture').onclick(),second=h.nodes.get('#ihRetryCapture').onclick();await flush();
+  const posts=h.requests.filter(r=>r.init.method==='POST');assert.equal(posts.length,1);assert.deepEqual(JSON.parse(posts[0].init.body),{consent:true});assert.match(posts[0].url,/\/seller\/t{43}\/retry-capture$/);assert.equal(h.nodes.get('#ihRetryCapture').disabled,true);
+  finish(response({id:'attempt-2',token:'u'.repeat(43),capture_retry:attemptRecord(2).capture_retry}));await Promise.all([first,second]);
+  assert.equal(h.context.location.hash,'in-hand/capture/'+'u'.repeat(43));assert.equal(h.calls.ensure,0);assert.equal(h.calls.refresh,0);assert.equal(h.calls.camera,0);
+});
+
+test('generic retry responses need no lighting reason and resume opens an existing attempt with no new credit action',async()=>{
+  const h=harness({fetch:async()=>response({id:'attempt-3',token:'v'.repeat(43),capture_retry:attemptRecord(3).capture_retry})});await flush();h.api.setRoute(1);h.nodes.delete('#ihRetryCaptureConsent');h.api.bindCaptureRetry('u'.repeat(43),1);await h.nodes.get('#ihRetryCapture').onclick();
+  assert.equal(h.context.location.hash,'in-hand/capture/'+'v'.repeat(43));assert.equal(h.requests.filter(r=>r.init.method==='POST').length,1);assert.equal(h.calls.ensure,0);assert.equal(h.calls.camera,0);
+});
+
+test('a late retry POST cannot navigate another page and a failed or malformed response preserves the result for retry',async()=>{
+  let finish;const h=harness({fetch:async()=>new Promise(resolve=>finish=resolve)});await flush();h.api.setRoute(1);h.nodes.get('#ihRetryCaptureConsent').checked=true;h.api.bindCaptureRetry('t'.repeat(43),1);
+  const pending=h.nodes.get('#ihRetryCapture').onclick();await flush();h.api.setRoute(2);finish(response({token:'u'.repeat(43)}));await pending;assert.equal(h.context.location.hash,'#other');
+  for(const value of [response({detail:'The request could not finish.'},false,503),response({token:'javascript:bad'})]){
+    const failed=harness({fetch:async()=>value});await flush();failed.api.setRoute(1);failed.nodes.get('#ihRetryCaptureConsent').checked=true;failed.api.bindCaptureRetry('t'.repeat(43),1);await failed.nodes.get('#ihRetryCapture').onclick();assert.equal(failed.context.location.hash,'#other');assert.equal(failed.nodes.get('#ihRetryCapture').disabled,false);assert.equal(failed.nodes.get('#ihQualityRetryError').hidden,false);assert.equal(failed.calls.ensure,0);
+  }
+});
+
+test('a concurrent attempt-limit conflict reloads server policy rather than enabling a stale fourth-attempt button',async()=>{
+  const h=harness({fetch:async(_url,init)=>init.method==='POST'?response({detail:'The 3-attempt limit has been reached.'},false,409):response(attemptRecord(3))});await flush();h.api.setRoute(1);h.nodes.get('#ihRetryCaptureConsent').checked=true;h.api.bindCaptureRetry('v'.repeat(43),1);await h.nodes.get('#ihRetryCapture').onclick();await flush();
+  assert.equal(h.requests.filter(r=>r.init.method==='POST').length,1);assert.match(h.nodes.get('#ihStandalone').innerHTML,/Attempt 3 of 3/);assert.match(h.nodes.get('#ihStandalone').innerHTML,/All 3 attempts have been used/);assert.doesNotMatch(h.nodes.get('#ihStandalone').innerHTML,/id="ihRetryCapture"/);assert.equal(h.calls.ensure,0);
+});
+
+test('handheld and flat recording guidance matches photo angles while stationary and digital modes preserve their exceptions',async()=>{
+  for(const mode of ['handheld','flat','stationary','digital']){
+    const h=harness({fetch:async()=>response(attemptRecord(1,{status:'waiting',capture_mode:mode}))});await flush();h.api.setRoute(1);await h.api.showSeller('t'.repeat(43),1);
+    const html=h.nodes.get('#ihStandalone').innerHTML;assert.match(html,/Attempt 1 of 3/);assert.match(html,/Match these views/);assert.match(html,/angle and position shown in each photo/);
+    if(mode==='stationary'){assert.match(html,/Do not lift or move a heavy appliance/);assert.doesNotMatch(html,/Hold the item in your hand/);}
+    else if(mode==='digital'){assert.match(html,/second screen/);assert.match(html,/Hide usable barcodes/);assert.doesNotMatch(html,/Hold the item in your hand/);}
+    else {assert.match(html,/Hold the item in your hand/);assert.match(html,/Slowly turn it so every selected view is visible/);}
+    assert.match(h.api.captureRetryBox(attemptRecord(),{mode}),new RegExp(mode==='stationary'?'Do not lift':mode==='digital'?'second screen':'Hold the item in your hand'));
+    assert.equal(h.calls.camera,0);
+  }
+});
+
+test('an old seller link follows only the server provided valid newer capture and buyer retries keep sharing unchecked',async()=>{
+  const next='u'.repeat(43),r=attemptRecord(1,{capture_redirect:{id:'attempt-2',token:next,attempt_number:2}});
+  const h=harness({fetch:async()=>response(r)});await flush();h.api.setRoute(1);await h.api.showSeller('t'.repeat(43),1);assert.equal(h.context.location.hash,'in-hand/capture/'+next);assert.equal(h.calls.camera,0);
+  const buyer=harness({fetch:async()=>response(attemptRecord(2,{status:'waiting',request_kind:'buyer',buyer_request:{state:'submitted',listing_url:listingURL}}))});await flush();buyer.api.setRoute(1);await buyer.api.showSeller(next,1);const html=buyer.nodes.get('#ihStandalone').innerHTML;assert.match(html,/Attempt 2 of 3/);assert.doesNotMatch(html,/id="ihShareEvidence"[^>]*checked/);assert.match(html,/Required for this buyer request/);
+});
+
+test('attempt histories link separate authorized records and metadata-only child changes refresh the owner report',()=>{
+  const h=harness();h.api.setManagementKey(managementKey);
+  const first=attemptRecord(1),second=attemptRecord(2),r={...first,capture_attempts:{root_request_id:first.id,latest_request_id:second.id,attempts:[{...first,attempt_number:1,is_latest:false},{...second,attempt_number:2,is_latest:true}],latest_attempt:second}};
+  const html=h.api.captureAttemptHistory(r);assert.match(html,/Attempt 1 · This record/);assert.match(html,/View latest attempt · 2 of 3/);assert.ok(html.includes('#in-hand/report/attempt-2/'+managementKey));assert.match(html,/not combined across attempts/);assert.doesNotMatch(html,/capture\/|seller-capture-token|data-private/);
+  assert.notEqual(h.api.reportFingerprint(first),h.api.reportFingerprint(r));assert.equal(h.api.watchCaptureAttempts(r),true);
+  const done=attemptRecord(3,{status:'confirmed',verified_count:1,total_count:1});assert.equal(h.api.watchCaptureAttempts({...r,capture_attempts:{...r.capture_attempts,latest_attempt:done}}),false);
+});
+
+test('visual match percentage accepts only real integer bounds and never substitutes a categorical or missing score',()=>{
+  const h=harness();
+  for(const score of [0,87,100])assert.match(h.api.photoMatchPercentage({match_percentage:score}),new RegExp(`Visual match · ${score}%`));
+  for(const score of [undefined,null,'87',true,-1,101,87.5,Infinity,NaN,'<script>']){
+    const html=h.api.photoMatchPercentage({finding:'supported',match_percentage:score});assert.match(html,/score unavailable/);assert.doesNotMatch(html,/[0-9]+%|<script>/);assert.equal(h.api.photoMatchPercentage({match_percentage:score},{hideMissing:true}),'');
+  }
+  assert.equal(h.api.photoMatchPercentage({match_percentage:100},{pending:true}),'');assert.equal(h.api.photoMatchScope([{}]),'');assert.match(h.api.photoMatchScope([{match_percentage:87}]),/Visual similarity estimate; verification also checks identifying details/);
+});
+
+test('high visual scores keep supported but unverified and contradicted photos unverified without changing eligible photos',()=>{
+  const h=harness(),refs=[{id:'one'}];
+  for(const [finding,label] of [['supported','Match found; verification not established'],['contradicted','Did not match'],['not_established','Not verified']]){
+    const html=h.api.photoResultCards({refs,findings:new Map([[0,{finding,evidence:'Identifying detail unreadable.',match_percentage:99}]]),eligible:new Set()});assert.match(html,/Visual match · 99%/);assert.ok(html.includes(label));assert.match(html,/No verified marking or QR code/);assert.doesNotMatch(html,/Photo 1 · Verified match/);
+  }
+  const verified=h.api.photoResultCards({refs,findings:new Map([[0,{finding:'supported',match_percentage:100}]]),eligible:new Set([0])});assert.match(verified,/Photo 1 · Verified match/);assert.match(verified,/Visual match · 100%/);
+});
+
+test('seller results render server attempt and visual score independently of verification success',async()=>{
+  const r=attemptRecord(2,{media:[{id:'reference-photo'}],photos:[{photo_index:0,finding:'supported',evidence:'Number could not be read.',match_percentage:88}]});
+  const h=harness({fetch:async()=>response(r)});await flush();h.api.setupCapture(r);await h.api.showSellerResult('u'.repeat(43),1);const html=h.nodes.get('#ihStandalone').innerHTML;
+  assert.match(html,/Attempt 2 of 3/);assert.match(html,/Try again \(1 attempt left\)/);assert.match(html,/same original photos/);assert.match(html,/Visual match · 88%/);assert.match(html,/verification also checks identifying details/);assert.match(html,/No verified marking|More evidence is needed/);assert.doesNotMatch(html,/All photos matched|verified photos are ready/);
+});
+
+test('explicit read-only detail responses preserve evidence/history while hiding unsupported mutations',async()=>{
+  const child=attemptRecord(2,{title:'Child result',management_read_only:true,analysis_status:'failed',analysis:{summary:'Retry comparison later.'}});
+  const h=harness();await flush();h.api.setRoute(1);h.api.setManagementKey(managementKey);await h.api.showReport(child.id,1,child);assert.doesNotMatch(h.api.page.innerHTML,/id="ihRetryAnalysis"|id="ihPublishForm"|id="ihWithdraw"/);assert.match(h.api.page.innerHTML,/Selected photos/);assert.equal(h.requests.filter(r=>r.init.method==='POST').length,0);
+});
+
+test('an explicit withdraw permission remains available in a read-only view without enabling other mutations',()=>{
+  const h=harness();h.api.setManagementKey(managementKey);
+  const child=attemptRecord(2,{management_read_only:true,can_withdraw:true,media:[{id:'reference-photo',role:'listing'}],eligible_photo_indices:[0],verified_count:1,publication_status:'ready',publication:{id:'child-proof',photos:[{id:'marked-photo',photo_index:0}]}});
+  const publication=h.api.publicationBox(child);assert.match(publication,/id="ihWithdraw"/);assert.doesNotMatch(publication,/ihPublishForm|ihRetryAnalysis/);assert.match(h.api.managementBox(child),/withdraw its public record/);assert.doesNotMatch(h.api.managementBox(child),/Anyone with it can manage this photo set/);
+  assert.doesNotMatch(h.api.publicationBox({...child,can_withdraw:false}),/id="ihWithdraw"/);
+});
+
+test('server-approved root lineage retains normal child reprocessing, publication and withdrawal controls with the original key',async()=>{
+  const h=harness();await flush();h.api.setRoute(1);h.api.setManagementKey(managementKey);
+  const child=attemptRecord(2,{title:'Retry result',management_read_only:false,can_withdraw:true,analysis_status:'failed',analysis:{summary:'Comparison interrupted.'}});
+  await h.api.showReport(child.id,1,child);assert.match(h.api.page.innerHTML,/id="ihRetryAnalysis"/);assert.ok(h.api.managementBox(child).includes('#in-hand/report/attempt-2/'+managementKey));assert.doesNotMatch(h.api.managementBox(child),/read-only/);
+  const eligible={...child,analysis_status:'complete',total_count:1,verified_count:1,eligible_photo_indices:[0],media:[{id:'reference-photo',role:'listing'}],publication:null};assert.match(h.api.publicationBox(eligible),/id="ihPublishForm"/);
+  assert.match(h.api.publicationBox({...eligible,publication:{id:'derived-proof',photos:[{id:'marked-photo',photo_index:0}]}}),/id="ihWithdraw"/);assert.equal(h.requests.filter(r=>r.init.method==='POST').length,0);
+});
+
+const selectorRecord=(number=1,verified=[],extra={})=>{
+  const data=attemptRecord(number,{root_photo_indices:[0,1,2,3],root_photos:[0,1,2,3].map(index=>({photo_index:index,media_id:'root-photo-'+index,url:'/root-photos/'+index})),...extra});
+  data.capture_retry={...data.capture_retry,limit_scope:'item',recording_sequence_number:number,retryable_photo_indices:[0,1,2,3].filter(index=>!verified.includes(index)),photo_attempts:[0,1,2,3].map(index=>({photo_index:index,attempts_used:1,max_attempts:3,remaining_attempts:3-number,allowed:!verified.includes(index)&&number<3,verified:verified.includes(index),publication_id:verified.includes(index)?'source-proof-'+index:null,source_request_id:verified.includes(index)?'earlier-record':null}))};return data;
+};
+function selectorNodes(h,indices=[0,1,2,3]){
+  for(const index of indices){h.nodes.set('retry-photo-'+index,{dataset:{retryPhotoIndex:String(index)},checked:true});h.nodes.set('retry-one-'+index,{dataset:{retryThisPhoto:String(index)}});}
+  h.nodes.set('retry-all',{dataset:{retryAllFailed:''}});
+}
+
+test('all truly unverified root images get retry controls, including categorically supported photos; verified proof keeps its source',()=>{
+  const h=harness(),r=selectorRecord(1,[1]);r.photos=[0,1,2,3].map(index=>({photo_index:index,finding:[0,3].includes(index)?'supported':'not_established',evidence:'Needs identifying detail.',match_percentage:84}));
+  const html=h.api.rootPhotoRetryPanel(r,{token:r.token});assert.equal((html.match(/data-retry-this-photo=/g)||[]).length,3);assert.match(html,/data-retry-this-photo="0"/);assert.match(html,/data-retry-this-photo="3"/);assert.doesNotMatch(html,/data-retry-this-photo="1"/);assert.match(html,/Retry all failed photos/);assert.match(html,/#in-hand\/verify\/source-proof-1/);assert.match(html,/Verified in its source record/);assert.match(html,/matches are not combined into one video/);assert.ok(html.includes('/seller/'+r.token+'/root-photos/3'));assert.match(h.api.captureAttemptLabel(r),/2 retries left for this item · Shared across all photos/);
+  assert.equal(h.api.rootPhotoRetryPanel({...r,root_photos:[{photo_index:0,url:'https://outside.example/image.jpg'}]},{token:r.token}),'');
+});
+
+test('Retry this photo maps to immutable Photo4 and bulk selects only failed root indices',async()=>{
+  let finish;const r=selectorRecord(1,[1]);const h=harness({fetch:async(_url,init)=>init.method==='POST'?new Promise(resolve=>finish=resolve):response(r)});await flush();selectorNodes(h);h.api.setRoute(1);h.api.bindCaptureRetry(r.token,1,r);
+  h.nodes.get('retry-one-3').onclick();assert.deepEqual([...h.api.retrySelection(r)],[3]);assert.match(h.nodes.get('#ihRetrySelectionLabel').textContent,/Selected photos: 4/);
+  h.nodes.get('retry-all').onclick();assert.deepEqual([...h.api.retrySelection(r)],[0,2,3]);assert.equal(h.nodes.get('retry-photo-1').checked,false);
+  h.nodes.get('retry-one-3').onclick();h.nodes.get('#ihRetryCaptureConsent').checked=true;const first=h.nodes.get('#ihRetryCapture').onclick(),second=h.nodes.get('#ihRetryCapture').onclick();await flush();const posts=h.requests.filter(request=>request.init.method==='POST');assert.equal(posts.length,1);const payload=JSON.parse(posts[0].init.body);assert.deepEqual(payload.photo_indices,[3]);assert.match(payload.request_key,/^[A-Za-z0-9_-]{43}$/);assert.equal(payload.consent,true);assert.equal(h.calls.ensure,0);
+  finish(response({id:'photo-four-attempt',token:'u'.repeat(43),root_photo_indices:[3]}));await Promise.all([first,second]);assert.equal(h.context.location.hash,'in-hand/capture/'+'u'.repeat(43));
+});
+
+test('ambiguous selected-photo requests reuse the same intent key and original index bytes until acknowledged',async()=>{
+  const r=selectorRecord();let count=0;const h=harness({fetch:async()=>{if(++count===1)throw Error('Connection lost');return response({id:'child',token:'u'.repeat(43)});}});await flush();h.api.setRoute(1);h.api.setRetrySelection(r,[3]);h.nodes.get('#ihRetryCaptureConsent').checked=true;h.api.bindCaptureRetry(r.token,1,r);await h.nodes.get('#ihRetryCapture').onclick();await h.nodes.get('#ihRetryCapture').onclick();const posts=h.requests.filter(request=>request.init.method==='POST');assert.equal(posts.length,2);assert.equal(posts[0].init.body,posts[1].init.body);assert.deepEqual(JSON.parse(posts[1].init.body).photo_indices,[3]);assert.equal(h.calls.ensure,0);
+});
+
+test('lost-response then legacy resume does not replay attempt2 when the same photo legitimately needs attempt3',async()=>{
+  let count=0;const root=selectorRecord(),h=harness({fetch:async()=>{count++;if(count===1)throw Error('Lost creation response');return response({id:count===2?'child-2':'child-3',token:(count===2?'u':'v').repeat(43)});}});await flush();h.api.setRoute(1);const consent=h.nodes.get('#ihRetryCaptureConsent');consent.checked=true;h.api.setRetrySelection(root,[3]);h.api.bindCaptureRetry(root.token,1,root);await h.nodes.get('#ihRetryCapture').onclick();
+  const resume={...root,capture_retry:{...root.capture_retry,action:'resume',remaining_attempts:1,next_attempt_number:2}};h.nodes.delete('#ihRetryCaptureConsent');h.api.bindCaptureRetry(root.token,1,resume);await h.nodes.get('#ihRetryCapture').onclick();
+  const next={...root,capture_retry:{...root.capture_retry,remaining_attempts:1,next_attempt_number:3}};h.nodes.set('#ihRetryCaptureConsent',consent);h.api.setRetrySelection(next,[3]);h.api.bindCaptureRetry(root.token,1,next);await h.nodes.get('#ihRetryCapture').onclick();
+  const posts=h.requests.filter(request=>request.init.method==='POST').map(request=>JSON.parse(request.init.body));assert.equal(posts.length,3);assert.deepEqual(posts[0].photo_indices,[3]);assert.deepEqual(posts[1],{consent:true});assert.deepEqual(posts[2].photo_indices,[3]);assert.notEqual(posts[0].request_key,posts[2].request_key);assert.equal(h.context.location.hash,'in-hand/capture/'+'v'.repeat(43));assert.equal(h.calls.ensure,0);
+});
+
+test('active different-subset conflicts identify the existing selection and never silently record the requested new subset',async()=>{
+  const r=selectorRecord(),activeToken='a'.repeat(43);const h=harness({fetch:async()=>response({detail:{code:'active_capture',message:'A recording is active.',active_attempt:{id:'active-photo-one',token:activeToken,root_photo_indices:[0],recording_sequence_number:2}}},false,409)});await flush();h.api.setRoute(1);h.api.setRetrySelection(r,[3]);h.nodes.get('#ihRetryCaptureConsent').checked=true;h.api.bindCaptureRetry(r.token,1,r);await h.nodes.get('#ihRetryCapture').onclick();const html=h.nodes.get('#ihQualityRetryError').innerHTML;assert.match(html,/photo 1/);assert.match(html,/Continue existing recording/);assert.ok(html.includes('#in-hand/capture/'+activeToken));assert.equal(h.context.location.hash,'#other');assert.equal(h.requests.filter(request=>request.init.method==='POST').length,1);assert.equal(h.calls.camera,0);assert.equal(h.calls.ensure,0);
+});
+
+test('stale already-verified selections refresh server policy and cannot submit verified indices again',async()=>{
+  const before=selectorRecord(),after=selectorRecord(2,[3]);const h=harness({fetch:async(_url,init)=>init.method==='POST'?response({detail:{code:'already_verified',message:'Photo 4 is already verified.'}},false,409):response(after)});await flush();h.api.setRoute(1);h.api.setRetrySelection(before,[3]);h.nodes.get('#ihRetryCaptureConsent').checked=true;h.api.bindCaptureRetry(before.token,1,before);await h.nodes.get('#ihRetryCapture').onclick();await flush();assert.equal(h.requests.filter(request=>request.init.method==='POST').length,1);assert.doesNotMatch(h.nodes.get('#ihStandalone').innerHTML,/data-retry-this-photo="3"/);assert.match(h.nodes.get('#ihStandalone').innerHTML,/source-proof-3/);assert.equal(h.calls.ensure,0);
+});
+
+test('Photo4-only captures and public proof keep original numbering with local evidence index zero',async()=>{
+  const r=attemptRecord(2,{status:'waiting',root_photo_indices:[3],media:[{id:'selected-photo-four'}]});const h=harness({fetch:async()=>response(r)});await flush();h.api.setRoute(1);await h.api.showSeller('u'.repeat(43),1);assert.match(h.nodes.get('#ihStandalone').innerHTML,/<figcaption>Photo 4<\/figcaption>/);assert.doesNotMatch(h.nodes.get('#ihStandalone').innerHTML,/<figcaption>Photo 1<\/figcaption>/);
+  const cards=h.api.photoResultCards({refs:[{id:'selected-photo-four'}],findings:new Map([[0,{photo_index:0,root_photo_index:3,finding:'supported',match_percentage:91}]]),eligible:new Set(),record:r});assert.match(cards,/Photo 4 ·/);assert.match(cards,/data-result-photo-index="0" data-root-photo-index="3"/);
+  const p=harness({fetch:async()=>response({id:'proof-four',status:'verified',title:'Photo4 proof',total_count:1,photo_count:1,photos:[{id:'marked',photo_index:0,root_photo_index:3,match_percentage:91}]})});await flush();p.api.setRoute(1);await p.api.showPublic('proof-four',1);assert.match(p.nodes.get('#ihStandalone').innerHTML,/Photo 4 · Verified match/);assert.doesNotMatch(p.nodes.get('#ihStandalone').innerHTML,/Photo 1 · Verified match/);
+});
+
+test('root overview retains all photo controls instead of redirecting to a narrow child, while fresh child links reveal no root capability',async()=>{
+  const childToken='u'.repeat(43),r=selectorRecord(1,[3]);r.capture_redirect={id:'child-four',token:childToken,attempt_number:2};r.latest_capture=r.capture_redirect;
+  const root=harness({fetch:async()=>response(r)});await flush();root.api.setRoute(1);await root.api.showSeller(r.token,1);await flush();assert.equal(root.context.location.hash,'#other');assert.equal((root.nodes.get('#ihStandalone').innerHTML.match(/Original listing photo/g)||[]).length,4);assert.match(root.nodes.get('#ihStandalone').innerHTML,/View latest recording/);assert.match(root.nodes.get('#ihStandalone').innerHTML,/data-retry-this-photo="0"/);assert.doesNotMatch(root.nodes.get('#ihStandalone').innerHTML,/data-retry-this-photo="3"/);
+  const fresh=harness();assert.equal(fresh.api.captureNavigation(attemptRecord(2),childToken),'');
+});
+
+test('processing activity prints actual queue/comparison states without invented logs or numeric progress',()=>{
+  const h=harness();
+  for(const status of ['queued','decoding','processing','running','pending']){
+    const html=h.api.processingActivity({status:'processing',analysis_status:status,queue:{state:'running',queued_at:1700000000},publication_status:'not_eligible'});assert.ok(html.includes('comparison.state = '+status));assert.match(html,/queue.state = running/);assert.match(html,/ih-working-dots/);assert.doesNotMatch(html,/\d+%|token|frame [0-9]+|estimated|executing|scanning/i);
+  }
+  assert.equal(h.api.processingActivity({status:'inconclusive',analysis_status:'complete',publication_status:'not_eligible'}),'');assert.equal(h.api.processingActivity({status:'waiting',analysis_status:'pending'}),'');
+  assert.doesNotMatch(h.api.processingActivity({status:'processing',analysis_status:'<script>bad'}),/<script>/);
+  const css=fs.readFileSync(path.join(__dirname,'..','in-hand.css'),'utf8');assert.match(css,/@media\(prefers-reduced-motion:reduce\).*ih-working-dots[^}]+animation:none/s);
+});
+
+test('queued root images suppress stale numeric scores and old evidence while preserving already verified source proof',()=>{
+  const h=harness(),r=selectorRecord(1,[1]);r.status='processing';r.analysis_status='queued';r.queue={state:'queued',queued_at:1700000000};r.photos=[0,1,2,3].map(index=>({photo_index:index,finding:'supported',match_percentage:95,evidence:'STALE_OLD_EVIDENCE'}));
+  const html=h.api.rootPhotoRetryPanel(r,{token:r.token});assert.doesNotMatch(html,/95%|STALE_OLD_EVIDENCE|Retry this photo|Retry all failed photos/);assert.match(html,/Waiting for comparison/);assert.match(html,/current comparison has not finished/);assert.match(html,/source-proof-1/);assert.match(html,/Verified in its source record/);
 });

@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 import time
 import zipfile
+import capture_attempts
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
@@ -146,6 +147,7 @@ def database(*, read_only=False):
         request_id TEXT NOT NULL UNIQUE REFERENCES ih_requests(id), reason TEXT NOT NULL);
     """)
     buyer_requests.schema(db)
+    capture_attempts.schema(db)
     public_evidence.ensure_schema(db)
     seller_email.schema(db)
     try:
@@ -288,6 +290,8 @@ class MatchedPhotoConsent(BaseModel):
 class CaptureRetryConsent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     consent: Literal[True]
+    photo_indices: list[StrictInt] | None = Field(default=None,min_length=1,max_length=4)
+    request_key: str | None = Field(default=None,pattern=r"^[A-Za-z0-9_-]{16,80}$")
 
 
 class Finding(BaseModel):
@@ -304,6 +308,7 @@ class PhotoFinding(BaseModel):
     finding: Literal["supported", "contradicted", "not_established"]
     evidence: str
     frame_indices: list[int]
+    match_percentage: StrictInt | None = Field(default=None,ge=0,le=100)
 
 
 class IdentifierCheck(BaseModel):
@@ -374,7 +379,7 @@ def access_digest(key):
 
 def owned(db, request_id, owner):
     if isinstance(owner,Access) and owner.request_id:
-        if owner.request_id != request_id:
+        if owner.request_id != request_id and not capture_attempts.descendant(db,owner.request_id,request_id):
             raise HTTPException(404,"Inspection not found")
         row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
     else:
@@ -398,11 +403,24 @@ def status(row):
     return "expired" if row["status"] in {"waiting", "capturing"} and row["expires"] <= time.time() else row["status"]
 
 
-def available(row):
+def available(row, db=None):
     if row["status"] in {"declined", "cancelled"}:
         raise HTTPException(410,"This buyer request was declined or cancelled")
     if status(row) == "expired":
         raise HTTPException(410, "This inspection link has expired. Ask the requester for a new one.")
+    if db is not None and row["status"] in {"waiting","capturing"}:
+        capture_attempts.require_capture_open(db,row)
+
+
+def root_reference_view(db,row):
+    root,_=capture_attempts.family(db,row['id'])
+    refs=db.execute("SELECT id FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(root['id'],)).fetchall()
+    mapping=capture_attempts.projection(db,row['id'],root['id'],len(refs))
+    latest=capture_attempts.redirect(db,row) if row['id']==root['id'] else None
+    return {'root_photo_indices':mapping,
+            'root_photos':[{'photo_index':index,'media_id':media['id'],
+                            'url':f"/root-photos/{index}"} for index,media in enumerate(refs) if index in mapping],
+            **({'latest_capture':latest} if latest else {})}
 
 
 def clean_recording_location(location):
@@ -482,7 +500,7 @@ def location_capture_active(db, row, session_id):
     return session
 
 
-def view(db, row, private=False):
+def view(db, row, private=False, *, include_attempts=True):
     credits.settle_check(db, row["id"])
     listing = json.loads(row["listing"])
     media = [dict(m) for m in db.execute("SELECT id,role,mime,sha256,seconds,label FROM ih_media WHERE request_id=? ORDER BY rowid", (row["id"],))]
@@ -494,8 +512,10 @@ def view(db, row, private=False):
     if queue := verification_queue.public_status(db,row["id"]):
         result["queue"] = queue
     retry = db.execute("SELECT reason FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()
-    if retry:
+    if retry and retry["reason"] in {"low_light","motion_blur"}:
         result["capture_retry_reason"] = retry["reason"]
+    result["capture_retry"] = capture_attempts.metadata(db,row,capture_retry_reason(db,row))
+    result.update(root_reference_view(db,row))
     if location := session_location(db,row):
         result["location"] = location
     if private:
@@ -506,6 +526,23 @@ def view(db, row, private=False):
         result.update(photo_eligibility(db,row))
         if listing.get("auto_publish") is True:
             result["publication_status"] = seller_publication(db,row)["publication_status"]
+        if include_attempts:
+            def summarize(item):
+                eligibility=photo_eligibility(db,item)
+                publication=db.execute("SELECT id FROM ih_publications WHERE request_id=?",(item["id"],)).fetchone()
+                analysis=json.loads(item["analysis"] or "{}")
+                return {"id":item["id"],"status":status(item),"analysis_status":item["analysis_status"],
+                        "result":analysis.get("result"),"verified_count":eligibility["verified_count"],
+                        "total_count":eligibility["total_count"],"created":item["created"],
+                        "publication_status":seller_publication(db,item).get("publication_status"),
+                        "publication_id":publication["id"] if publication else None}
+            try:
+                attempts=capture_attempts.history(db,row,summarize)
+                latest=db.execute("SELECT * FROM ih_requests WHERE id=?",(attempts["latest_request_id"],)).fetchone()
+                attempts["latest_attempt"]=view(db,latest,True,include_attempts=False) if latest["id"]!=row["id"] else None
+                result["capture_attempts"]=attempts
+            except HTTPException:
+                result["capture_attempts"]={"root_request_id":row["id"],"latest_request_id":row["id"],"attempts":[],"latest_attempt":None}
     return result
 
 
@@ -827,7 +864,7 @@ def check_reference_view(token, data, content, quality):
     with database() as db:
         db.execute("BEGIN IMMEDIATE")
         row = seller(db,token)
-        available(row)
+        available(row,db)
         if row["status"] != "capturing" or row["session_id"] != data.session_id:
             raise HTTPException(409,"This recording is no longer active")
         sess = db.execute("SELECT * FROM ih_sessions WHERE id=?",(data.session_id,)).fetchone()
@@ -1234,6 +1271,29 @@ def recommendation(visual, photo_count, checks):
     return "inconclusive"
 
 
+def photo_match_percentage(visual, photo, frame_count, allowed_frame_indices=None):
+    """A frame-cited appearance estimate, never a verification probability."""
+    value=photo.get("match_percentage")
+    indices=photo.get("frame_indices")
+    if type(value) is not int or not 0 <= value <= 100 or not isinstance(indices,list) or not indices:
+        return None
+    if allowed_frame_indices is not None and (not isinstance(allowed_frame_indices,list)
+            or any(type(i) is not int for i in allowed_frame_indices)):
+        return None
+    allowed=set(allowed_frame_indices) if allowed_frame_indices is not None else set(range(frame_count))
+    if any(type(i) is not int or not 0 <= i < frame_count or i not in allowed for i in indices):
+        return None
+    contradicted=photo.get("finding")=="contradicted"
+    for raw in visual.get("identifier_checks") or []:
+        try:
+            check=normalized_identifier_check(IdentifierCheck.model_validate(raw))
+            if check.photo_index==photo.get("photo_index") and check.finding=="contradicted":
+                contradicted=True
+        except (ValidationError,ValueError,TypeError):
+            continue
+    return min(value,49) if contradicted else value
+
+
 def analyze(request_id, queue_claim=None):
     analysis_started = perf_counter()
     preparation = None
@@ -1292,6 +1352,10 @@ def analyze(request_id, queue_claim=None):
             "Check requested movements and consistency across the supplied timeline frames. Cite ORIGINAL video_frame indices in their labels; "
             "indices may have gaps and must not be renumbered. Prefer only the 1-3 clearest supporting frames per finding; add more only when necessary. "
             "Feature rankings are sampling hints, never verification evidence. "
+            "For each photo return match_percentage: an integer 0-100 estimating directly visible visual similarity, not a calibrated probability, identity confidence or authenticity score. "
+            "Assess comparable visible appearance generously: ordinary angle, lighting, perspective and scale differences alone are not automatic penalties. "
+            "An unreadable serial does not mean zero visual similarity; it must still keep identity unverified. A readable different identifier or visible different individual item is a contradiction and must score below 50 for the affected photo. "
+            "Return null when there is insufficient comparable visible evidence; never invent a percentage from the categorical finding alone. Cite actual supplied frames for every numeric estimate. "
             "Enumerate every material listing assertion in claims; anything not visually provable is not_established. "
             "Be concise: photo/claim evidence at most 20 words, identifier evidence at most 12 words, each distinctive detail at most 15 words, summary at most 35 words. "
             "Never transcribe barcodes, QR payloads, access/redemption codes, passwords or other credentials. For digital/ticket listings return identifier_checks=[]; "
@@ -1325,6 +1389,9 @@ def analyze(request_id, queue_claim=None):
             visual.identifier_checks = [normalized_identifier_check(check) for check in visual.identifier_checks
                 if not re.search(r"barcode|\bqr\b|password|credential|access.?code|redemption", check.label, re.I)]
         align_identifier_photo_findings(visual)
+        scored=visual.model_dump()
+        for photo in visual.photos:
+            photo.match_percentage=photo_match_percentage(scored,photo.model_dump(),len(frames),selected)
         result = recommendation(visual, len(refs), analysis["video"])
         if (listing["description"] or listing["details"]) and not visual.claims and result == "confirmed":
             result = "inconclusive"
@@ -1629,6 +1696,13 @@ def publication_manifest(db, row, publication, eligibility=None):
         if not photos or len(photos) != total or indices != eligibility["eligible_photo_indices"]:
             return None
     location = published_location(db,publication["id"])
+    try:
+        root,_=capture_attempts.family(db,row["id"])
+        root_indices=capture_attempts.projection(db,row["id"],root["id"],len(capture_attempts.references(db,root["id"])))
+    except HTTPException:
+        return None
+    for photo in photos:
+        photo['root_photo_index']=root_indices[photo['photo_index']]
     return {"id":publication["id"],"created":publication["created"],"photos":photos,
             "eligible_photo_indices":indices,"verified_count":len(photos),"total_count":total,"partial":len(photos)<total,
             **({"location":location} if location else {})}
@@ -1691,6 +1765,8 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False, q
     prior = existing_publication(db,row,snapshot["eligibility"])
     if prior:
         return prior
+    if not capture_attempts.publication_allowed(db,row):
+        raise HTTPException(409,"This attempt family cannot publish new proof")
     render_started = perf_counter()
     publication_id, rendered = render_publication(snapshot,preparation)
     render_ms = round((perf_counter()-render_started)*1000,2)
@@ -1703,6 +1779,8 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False, q
     prior = existing_publication(db,row,current["eligibility"])
     if prior:
         return prior
+    if not capture_attempts.publication_allowed(db,row):
+        raise HTTPException(409,"This attempt family cannot publish new proof")
     if (snapshot["fingerprint"] != current["fingerprint"] or
             (require_auto and not automatic_publication_allowed(json.loads(row["listing"]),current["eligibility"]))):
         raise HTTPException(409,"The verification changed while its photos were being prepared")
@@ -1739,6 +1817,8 @@ def auto_publish_confirmed(request_id, preparation=None, queue_claim=None):
             row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
             if not row or not automatic_publication_allowed(json.loads(row["listing"]),photo_eligibility(db,row)):
                 return
+            if not capture_attempts.publication_allowed(db,row):
+                return
             prior = db.execute("SELECT * FROM ih_publications WHERE request_id=?",(request_id,)).fetchone()
             if prior:
                 # An owner's withdrawal is permanent for this inspection.
@@ -1771,7 +1851,8 @@ def schedule_publication(db, row, background):
     """Recover opted-in completed records without putting rendering on a GET."""
     if verification_queue.has_job(db,row["id"]):
         return  # The leased durable worker owns automatic publication recovery.
-    if (automatic_publication_allowed(json.loads(row["listing"]),photo_eligibility(db,row))
+    if (capture_attempts.publication_allowed(db,row)
+            and automatic_publication_allowed(json.loads(row["listing"]),photo_eligibility(db,row))
             and not db.execute("SELECT 1 FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()):
         job = db.execute("SELECT state,attempts,updated FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
         if not job or (job["attempts"] < 2 and (job["state"] != "processing" or job["updated"] <= time.time()-120)):
@@ -1803,11 +1884,10 @@ def seller_publication(db, row):
 
 
 def capture_retry_reason(db, row):
-    """A first quality-only failure may explicitly start one light-assisted retry."""
+    """Only validated camera-quality diagnostics enable light assistance."""
     if (row["status"] != "inconclusive" or row["analysis_status"] != "complete"
             or not identifier_text_allowed(json.loads(row["listing"]))
-            or db.execute("SELECT 1 FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
-            or db.execute("SELECT 1 FROM ih_capture_retries WHERE request_id=?",(row["id"],)).fetchone()):
+            or db.execute("SELECT 1 FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()):
         return None
     try:
         analysis = json.loads(row["analysis"])
@@ -1846,12 +1926,15 @@ def seller_result_payload(db, row):
     count = eligibility["total_count"]
     findings = {}
     visual = analysis.get("visual") or {}
+    frame_count=db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='frame'",(row["id"],)).fetchone()[0]
+    selected=((analysis.get("video") or {}).get("frame_selection") or {}).get("selected_frame_indices")
     for photo in visual.get("photos") or []:
         if not isinstance(photo,dict):
             continue
         index = photo.get("photo_index")
         if type(index) is int and 0 <= index < count and photo.get("finding") in {"supported","contradicted","not_established"}:
-            findings[index] = {"photo_index":index,"finding":photo["finding"],"evidence":str(photo.get("evidence") or "")}
+            findings[index] = {"photo_index":index,"finding":photo["finding"],"evidence":str(photo.get("evidence") or ""),
+                               "match_percentage":photo_match_percentage(visual,photo,frame_count,selected)}
     identifiers = []
     if identifier_text_allowed(json.loads(row["listing"])):
         for raw in visual.get("identifier_checks") or []:
@@ -1868,15 +1951,19 @@ def seller_result_payload(db, row):
     current_status = status(row)
     pending = current_status in {"waiting","capturing","processing"}
     fallback = "Awaiting comparison with the camera recording." if pending else "A match has not been established for this photo."
-    return {"id":row["id"],"status":current_status,"analysis_status":row["analysis_status"],
+    reference_view=root_reference_view(db,row)
+    for local,finding in findings.items():
+        finding['root_photo_index']=reference_view['root_photo_indices'][local]
+    return {"id":row["id"],"status":current_status,"analysis_status":row["analysis_status"],**reference_view,
             **({"queue":queue} if (queue:=verification_queue.public_status(db,row["id"])) else {}),
             "summary":str(analysis.get("summary") or ("Complete the camera scan to compare these photos." if pending else "An item match has not been established.")),
             "result":analysis.get("result") if analysis.get("result") in {"confirmed","mismatch","inconclusive"} else "inconclusive",
-            "photos":[findings.get(i,{"photo_index":i,"finding":"not_established","evidence":fallback}) for i in range(count)],
+            "photos":[findings.get(i,{"photo_index":i,"root_photo_index":reference_view['root_photo_indices'][i],"finding":"not_established","evidence":fallback,"match_percentage":None}) for i in range(count)],
             **({"identifier_checks":identifiers} if identifiers else {}),
             **eligibility,**seller_publication(db,row),
             **({"location":location} if (location := session_location(db,row)) else {}),
             **({"capture_retry_reason":reason} if (reason := capture_retry_reason(db,row)) else {}),
+            "capture_retry":capture_attempts.metadata(db,row,capture_retry_reason(db,row)),
             "scope":SCOPE}
 
 
@@ -1884,7 +1971,7 @@ def seller_event_state(token, previous=None):
     """Poll small change metadata; serialize findings only when something changed."""
     with database(read_only=True) as db:
         row = seller(db,token)
-        available(row)
+        available(row,db)
         publication = db.execute("SELECT id,created,revoked FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
         job = db.execute("SELECT state,attempts,updated FROM ih_publication_jobs WHERE request_id=?",(row["id"],)).fetchone()
         queue = verification_queue.public_status(db,row["id"])
@@ -2208,7 +2295,7 @@ def create_router(authenticate):
     def requests(background: BackgroundTasks, owner=Depends(access)):
         with database() as db:
             cleanup_scan_media(db,time.time())
-            rows = [owned(db,owner.request_id,owner)] if owner.request_id else db.execute("SELECT * FROM ih_requests WHERE owner_id=? ORDER BY created DESC LIMIT 100",(owner.owner_id,)).fetchall()
+            rows = [owned(db,owner.request_id,owner)] if owner.request_id else db.execute("SELECT * FROM ih_requests WHERE owner_id=? AND NOT EXISTS (SELECT 1 FROM ih_capture_retries c WHERE c.request_id=ih_requests.id) ORDER BY created DESC LIMIT 100",(owner.owner_id,)).fetchall()
             for row in rows:
                 schedule_publication(db,row,background)
             return [view(db,row,True) for row in rows]
@@ -2219,15 +2306,22 @@ def create_router(authenticate):
             cleanup_scan_media(db,time.time())
             row = owned(db,request_id,owner)
             schedule_publication(db,row,background)
-            return view(db,row,True)
+            result=view(db,row,True)
+            result["management_read_only"]=False
+            result["can_withdraw"]=True
+            latest=(result.get("capture_attempts") or {}).get("latest_attempt")
+            if latest is not None:
+                latest["management_read_only"]=False
+                latest["can_withdraw"]=True
+            return result
 
     @router.get("/seller/{token}")
     def seller_detail(token: str):
         with database() as db:
             cleanup_scan_media(db,time.time())
             row = seller(db,token)
-            available(row)
-            return view(db,row)
+            available(row,db)
+            return {**view(db,row),**({"capture_redirect":target} if (target:=capture_attempts.redirect(db,row)) else {})}
 
     @router.get("/seller/{token}/result")
     def seller_result(token: str, background: BackgroundTasks):
@@ -2235,7 +2329,7 @@ def create_router(authenticate):
         with database() as db:
             cleanup_scan_media(db,time.time())
             row = seller(db,token)
-            available(row)
+            available(row,db)
             schedule_publication(db,row,background)
             return seller_result_payload(db,row)
 
@@ -2244,7 +2338,7 @@ def create_router(authenticate):
         # Validate before opening a stream; no AI/publication job is scheduled.
         with database() as db:
             row = seller(db,token)
-            available(row)
+            available(row,db)
             request_id = row["id"]
         initial = seller_event_state(token)
         admission = ResultStreamAdmission(request_id)
@@ -2253,33 +2347,46 @@ def create_router(authenticate):
 
     @router.post("/seller/{token}/retry-capture",status_code=201)
     def retry_capture(token: str, data: CaptureRetryConsent, background: BackgroundTasks):
-        """One fresh quality retry with identical photos; old evidence is retained."""
+        """Allocate an immutable selected-reference take under the shared root."""
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = seller(db,token)
-            available(row)
-            reason = capture_retry_reason(db,row)
-            if not reason:
-                raise HTTPException(409,"A light-assisted retry is available only after a first low-light or motion-blur capture failure")
-            prior = db.execute("SELECT r.id,r.token FROM ih_capture_retries c JOIN ih_requests r ON r.id=c.request_id WHERE c.parent_request_id=?",(row["id"],)).fetchone()
-            if prior:
-                return {"id":prior["id"],"token":prior["token"],"capture_retry_reason":reason}
-            references = db.execute("SELECT mime,content,seconds,label FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(row["id"],)).fetchall()
-            if len(references) > MAX_PHOTOS:
+            row=seller(db,token)
+            available(row,db)
+            root,_=capture_attempts.family(db,row["id"])
+            credits.settle_check(db,root["id"])
+            root,family,indices,fingerprint,prior_id=capture_attempts.prepare_selection(db,row,data.photo_indices,data.request_key)
+            def response_for(child):
+                reason=db.execute("SELECT reason FROM ih_capture_retries WHERE request_id=?",(child["id"],)).fetchone()
+                return {"id":child["id"],"token":child["token"],"root_photo_indices":capture_attempts.projection(db,child["id"],root["id"],len(capture_attempts.references(db,root["id"]))),
+                        "capture_retry":capture_attempts.metadata(db,child,capture_retry_reason(db,child)),
+                        **({"capture_retry_reason":reason["reason"]} if reason and reason["reason"] in {"low_light","motion_blur"} else {})}
+            if prior_id:
+                return response_for(db.execute("SELECT * FROM ih_requests WHERE id=?",(prior_id,)).fetchone())
+            parent=family[-1]
+            capture_attempts.references(db,root["id"],verify_bytes=True)
+            capture_attempts.references(db,parent["id"],verify_bytes=True)
+            references=db.execute("SELECT mime,content,seconds,label FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(root["id"],)).fetchall()
+            if not 1<=len(references)<=MAX_PHOTOS:
                 raise HTTPException(409,"Choose up to four reference photos for a fresh check")
-            limited("in-hand-quality-retry:"+row["id"],3)
-            request_id, child_token, now = str(uuid4()), secrets.token_urlsafe(32), time.time()
-            # The capture token cannot edit listing claims, add replacement
-            # references or obtain owner management credentials.
+            limited("in-hand-capture-retry:"+root["id"],12)
+            request_id,child_token,now=str(uuid4()),secrets.token_urlsafe(32),time.time()
+            projected=capture_attempts.project_listing(root["listing"],indices,len(references))
+            listing=StoredListing.model_validate(projected)
             db.execute("INSERT INTO ih_requests(id,owner_id,token,listing,created,expires,plan) VALUES (?,?,?,?,?,?,?)",
-                       (request_id,row["owner_id"],child_token,row["listing"],now,now+86400,row["plan"]))
-            for media in references:
+                       (request_id,root["owner_id"],child_token,json.dumps(projected),now,now+86400,json.dumps(make_plan(listing,len(indices)))))
+            for index in indices:
+                media=references[index]
                 store_media(db,request_id,"listing",media["mime"],media["content"],media["seconds"],media["label"])
-            db.execute("INSERT INTO ih_capture_retries VALUES (?,?,?)",(row["id"],request_id,reason))
-            credits.bind_quality_retry(db,row["id"],request_id)
-            event(db,request_id,"Fresh quality retry created; original photos and consent preserved")
+            reason=capture_retry_reason(db,parent) or "verification_failed"
+            db.execute("INSERT INTO ih_capture_retries VALUES (?,?,?)",(parent["id"],request_id,reason))
+            db.execute("INSERT INTO ih_capture_selections VALUES (?,?,?)",(request_id,root["id"],json.dumps(indices)))
+            if data.request_key:
+                capture_attempts.bind_key(db,root["id"],data.request_key,fingerprint,request_id)
+            credits.bind_quality_retry(db,root["id"],request_id)
+            event(db,request_id,"Included selected-photo recording created; earlier evidence and decisions preserved")
+            result=response_for(db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone())
         background.add_task(prepare_reference_features,request_id)
-        return {"id":request_id,"token":child_token,"capture_retry_reason":reason}
+        return result
 
     @router.post("/seller/{token}/enable-matched-photos")
     def enable_matched_photos(token: str, data: MatchedPhotoConsent, background: BackgroundTasks):
@@ -2287,7 +2394,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
-            available(row)
+            available(row,db)
             listing = json.loads(row["listing"])
             eligibility = photo_eligibility(db,row)
             prior = db.execute("SELECT revoked FROM ih_publications WHERE request_id=?",(row["id"],)).fetchone()
@@ -2314,7 +2421,7 @@ def create_router(authenticate):
         """Read-only approved exports, never a publication-management power."""
         with database() as db:
             row = seller(db,token)
-            available(row)
+            available(row,db)
             public = seller_publication(db,row)
             if public.get("publication_status") != "ready":
                 raise HTTPException(409,"Verified QR photos are not available for this capture")
@@ -2329,7 +2436,7 @@ def create_router(authenticate):
             now = time.time()
             cleanup_scan_media(db,now)
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if json.loads(row["listing"]).get("request_kind")=="buyer":
                 raise HTTPException(409,"Use the ten-second recording flow for this buyer request")
             if row["status"] not in {"waiting","capturing"}:
@@ -2362,7 +2469,7 @@ def create_router(authenticate):
             now = time.time()
             cleanup_scan_media(db,now)
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if row["status"] not in {"waiting","capturing"}:
                 raise HTTPException(409,"This inspection has already been submitted")
             limited("in-hand-start:"+row["id"],12)
@@ -2412,7 +2519,7 @@ def create_router(authenticate):
             raise HTTPException(422,"Use a fresh, valid device location for the current recording") from None
         with database() as db:
             row = seller(db,token)
-            available(row)
+            available(row,db)
             session = location_capture_active(db,row,data.session_id)
             if not session:
                 raise HTTPException(409,"Location can be added only during this active recording")
@@ -2457,7 +2564,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if row["status"] != "capturing" or row["session_id"] != data.session_id:
                 raise HTTPException(409,"This camera scan is no longer active. Start a fresh scan.")
             limited("in-hand-scan-progress:"+data.session_id,360)
@@ -2511,7 +2618,7 @@ def create_router(authenticate):
             raise HTTPException(422,"The recording has too many pieces")
         with database() as db:
             row = seller(db,token)
-            available(row)
+            available(row,db)
             sess = db.execute("SELECT s.started,a.max_seconds FROM ih_sessions s JOIN ih_scan_sessions a ON a.session_id=s.id WHERE s.id=? AND s.request_id=?",(session_id,row["id"])).fetchone()
             if row["status"] != "capturing" or row["session_id"] != session_id or not sess:
                 raise HTTPException(409,"This camera scan is no longer accepting recording pieces")
@@ -2534,7 +2641,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if row["status"] != "capturing" or row["session_id"] != session_id:
                 raise HTTPException(409,"This camera scan is no longer accepting recording pieces")
             previous = db.execute("SELECT sha256 FROM ih_scan_chunks WHERE session_id=? AND sequence=?",(session_id,sequence)).fetchone()
@@ -2555,7 +2662,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
-            available(row)
+            available(row,db)
             sess = db.execute("SELECT * FROM ih_sessions WHERE id=? AND request_id=?",(data.session_id,row["id"])).fetchone()
             meta = db.execute("SELECT * FROM ih_scan_sessions WHERE session_id=?",(data.session_id,)).fetchone()
             if not sess or not meta or row["session_id"] != data.session_id:
@@ -2623,7 +2730,7 @@ def create_router(authenticate):
             db.execute("BEGIN IMMEDIATE")
             verification_queue.check_capacity(db)
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if json.loads(row["listing"]).get("request_kind")=="buyer":
                 raise HTTPException(409,"Use the ten-second recording flow for this buyer request")
             if row["status"] not in {"waiting","capturing"}:
@@ -2652,7 +2759,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if row["status"] != "capturing" or row["session_id"] != data.session_id:
                 raise HTTPException(409,"This recording session is no longer active. Start a new recording.")
             capture = db.execute("SELECT * FROM ih_sessions WHERE id=?",(data.session_id,)).fetchone()
@@ -2679,7 +2786,7 @@ def create_router(authenticate):
     async def submit(token: str, request: Request, background: BackgroundTasks):
         with database() as db:
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if row["status"] != "capturing":
                 if row["submitted"]:
                     # A lost response must not require another recording or launch another job.
@@ -2715,7 +2822,7 @@ def create_router(authenticate):
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
             row = seller(db,token)
-            available(row)
+            available(row,db)
             if row["status"] != "capturing" or row["session_id"] != capture.session_id:
                 raise HTTPException(409,"This session is no longer accepting a recording")
             digest = hashlib.sha256(content).hexdigest()
@@ -2743,7 +2850,7 @@ def create_router(authenticate):
     def seller_photo(token: str, media_id: str):
         with database() as db:
             row = seller(db,token)
-            available(row)
+            available(row,db)
             item = db.execute("SELECT * FROM ih_media WHERE id=? AND request_id=? AND role='listing'",(media_id,row["id"])).fetchone()
             if not item:
                 raise HTTPException(404,"Reference photo not found")
@@ -2757,6 +2864,18 @@ def create_router(authenticate):
                 raise HTTPException(404,"Evidence not found")
             owned(db,item["request_id"],owner)
             return Response(item["content"],media_type=item["mime"],headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+    @router.get("/seller/{token}/root-photos/{photo_index}")
+    def seller_root_photo(token: str,photo_index: int):
+        with database() as db:
+            row=seller(db,token)
+            available(row,db)
+            root,_=capture_attempts.family(db,row['id'])
+            refs=db.execute("SELECT mime,content FROM ih_media WHERE request_id=? AND role='listing' ORDER BY rowid",(root['id'],)).fetchall()
+            permitted=capture_attempts.projection(db,row['id'],root['id'],len(refs))
+            if photo_index not in permitted:
+                raise HTTPException(404,"Reference photo not found")
+            return Response(refs[photo_index]['content'],media_type=refs[photo_index]['mime'],headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
     @router.post("/requests/{request_id}/analyze",status_code=202)
     def retry(request_id: str, background: BackgroundTasks, owner=Depends(access)):

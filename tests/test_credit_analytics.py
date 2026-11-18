@@ -69,6 +69,18 @@ def test_snapshot_does_not_settle_checks_or_call_provider(seeded, monkeypatch):
         assert db.execute('SELECT COUNT(*) FROM credit_ledger').fetchone()[0] == before
 
 
+def test_three_included_recordings_count_as_one_group_without_changing_financial_metrics(seeded):
+    before=credit_analytics.analytics(7)['summary']
+    with credits.database() as db:
+        db.execute("INSERT INTO ih_capture_retries VALUES ('0','1','verification_failed')")
+        db.execute("INSERT INTO ih_capture_retries VALUES ('1','2','verification_failed')")
+    after=credit_analytics.analytics(7)['summary']
+    assert after['recording_attempts']==after['verifications_total']==5
+    assert after['unique_verification_groups']==3
+    for key in ['gross_sales_cents','refunds_cents','payments_count','credits_used','current_credit_balance']:
+        assert after[key]==before[key]
+
+
 def test_empty_database_reports_zero_not_fake_data(tmp_path, monkeypatch):
     monkeypatch.setenv('LOCKX_DATA_DIR', str(tmp_path))
     with credits.database():

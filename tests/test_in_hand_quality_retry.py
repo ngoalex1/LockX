@@ -124,7 +124,8 @@ def test_quality_failed_first_capture_creates_one_new_inspection_with_identical_
     assert client.get(BASE+f"/requests/{child['id']}").status_code==401
     assert client.get(BASE+f"/requests/{child['id']}",headers={"X-LockX-Manage-Key":child["token"]}).status_code==404
     assert client.delete(BASE+f"/requests/{child['id']}/publication",headers={"X-LockX-Manage-Key":child["token"]}).status_code==404
-    assert retry(client,child).status_code==409,"A child cannot create an unlimited chain of new inspections"
+    resumed=retry(client,child)
+    assert resumed.status_code==201 and resumed.json()['id']==child['id'],"An active take is resumed rather than allocating another attempt"
 
 
 @pytest.mark.parametrize("case",[
@@ -132,7 +133,7 @@ def test_quality_failed_first_capture_creates_one_new_inspection_with_identical_
     "identity_contradicted","continuity_suspicious","challenge_not_followed","global_concern",
     "partial_capture","quality_override","replay_note","wrong_diagnostic","digital","matched_subset",
 ])
-def test_non_quality_or_integrity_failures_cannot_enable_lighting_retry(setup,case):
+def test_other_completed_failures_offer_generic_retakes_without_lighting(setup,case):
     client,_,_,_=setup
     record=quality_capture(setup)
     with ih.database() as db:
@@ -175,11 +176,13 @@ def test_non_quality_or_integrity_failures_cannot_enable_lighting_retry(setup,ca
         db.execute("UPDATE ih_requests SET analysis=?,listing=? WHERE id=?",(json.dumps(analysis),json.dumps(listing),record["id"]))
     before=stored_record(record["id"])
     response=retry(client,record)
-    assert response.status_code==409,response.text
+    assert response.status_code==201,response.text
+    assert "capture_retry_reason" not in response.json()
+    assert response.json()["capture_retry"]["light_assist_reason"] is None
     assert stored_record(record["id"])[0:2]==before[0:2]
     assert "capture_retry_reason" not in phone_result(client,record)
     with ih.database() as db:
-        assert db.execute("SELECT COUNT(*) FROM ih_capture_retries WHERE parent_request_id=?",(record["id"],)).fetchone()[0]==0
+        assert db.execute("SELECT COUNT(*) FROM ih_capture_retries WHERE parent_request_id=?",(record["id"],)).fetchone()[0]==1
 
 
 def test_quality_retry_requires_explicit_consent_and_the_original_capture_capability(setup):

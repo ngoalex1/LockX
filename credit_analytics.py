@@ -20,6 +20,7 @@ def analytics(days=30):
     summary = dict.fromkeys(("gross_sales_cents", "refunds_cents", "net_payments_cents",
                             "payments_count", "credits_purchased", "credits_granted", "credits_used",
                             "current_credit_balance", "wallet_accounts", "verifications_total",
+                            "recording_attempts", "unique_verification_groups",
                             "verified", "mismatch", "inconclusive", "failed", "pending"), 0)
     with database(read_only=True) as db:
         db.execute("BEGIN")  # One consistent snapshot; no reconciliation or provider calls.
@@ -59,6 +60,14 @@ def analytics(days=30):
             else:
                 outcome = "pending"
             summary[outcome] += count
+        summary['recording_attempts'] = summary['verifications_total']
+        summary['unique_verification_groups'] = db.execute("""SELECT COUNT(DISTINCT
+            COALESCE(selection.root_request_id,grandparent.parent_request_id,parent.parent_request_id,r.id))
+            FROM ih_requests r
+            LEFT JOIN ih_capture_selections selection ON selection.request_id=r.id
+            LEFT JOIN ih_capture_retries parent ON parent.request_id=r.id
+            LEFT JOIN ih_capture_retries grandparent ON grandparent.request_id=parent.parent_request_id
+            WHERE r.submitted>=? AND r.submitted<=?""",(since,now)).fetchone()[0]
     return {"currency": "USD", "timezone": "UTC", "days": days,
             "start": start.strftime("%Y-%m-%d"), "end": today.strftime("%Y-%m-%d"),
             "generated_at": now, "summary": summary, "daily": list(daily.values()),
@@ -67,5 +76,6 @@ def analytics(days=30):
                 "Refunds and net payments refer to purchases recorded in the selected period, including later recorded refunds. Processing fees and operating costs are excluded.",
                 "Free credit grants are separate from purchased credits and sales. Net credits used subtracts technical credit restorations recorded in the period.",
                 "Verification results count submitted inspection records, including retries; drafts are excluded. Matched means a visual match, not item authenticity.",
+                "Recording attempts count each submitted take. Unique verification groups count the original same-photo check once across its included attempts; neither count is a payment total.",
                 "Wallet accounts and current credit balance are all-time snapshot totals. This dashboard does not query PayPal live."
             ]}

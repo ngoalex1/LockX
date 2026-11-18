@@ -145,12 +145,16 @@ def test_existing_legacy_six_photo_retry_is_recovered_without_new_request(setup)
     response = retry(client, parent)
     assert response.status_code == 201, response.text
     child = response.json()
+    # Genuine historical retries predate selected-reference projections.
+    with ih.database() as db:
+        db.execute('DELETE FROM ih_capture_selections WHERE request_id=?',(child['id'],))
     for record in (parent, child):
         extend_historical_quality_references(record, 6)
     before = [stored_record(record["id"]) for record in (parent, child)]
     recovered = retry(client, parent)
     assert recovered.status_code == 201, recovered.text
-    assert recovered.json() == child
+    assert recovered.json()['id'] == child['id'] and recovered.json()['token'] == child['token']
+    assert recovered.json()['root_photo_indices'] == list(range(6))
     assert [stored_record(record["id"]) for record in (parent, child)] == before
     with ih.database() as db:
         assert db.execute("SELECT COUNT(*) FROM ih_requests").fetchone()[0] == 2

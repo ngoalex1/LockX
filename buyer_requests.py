@@ -72,9 +72,21 @@ def create_request(db, request_id, buyer_id, url, request_key, payload_hash):
 def info(db,request_id):
     schema(db)
     row=db.execute('SELECT b.*,r.status,r.analysis_status,r.submitted,r.expires FROM ih_buyer_requests b JOIN ih_requests r ON r.id=b.request_id WHERE b.request_id=?',(request_id,)).fetchone()
+    retake = False
+    if not row:
+        import capture_attempts
+        try:
+            root,_=capture_attempts.family(db,request_id)
+        except HTTPException:
+            return None
+        if root['id'] != request_id:
+            row=db.execute('SELECT b.*,r.status,r.analysis_status,r.submitted,r.expires FROM ih_buyer_requests b JOIN ih_requests r ON r.id=? WHERE b.request_id=?',(request_id,root['id'])).fetchone()
+            retake = row is not None
     if not row:
         return None
     state=row['state']
+    if retake and row['status'] in {'cancelled','declined','expired'}:
+        state=row['status']
     if row['submitted']:
         state='failed' if row['analysis_status'] in {'failed','unavailable'} else 'submitted' if row['status']=='processing' else 'completed'
     elif state=='pending' and row['expires']<=time.time():
@@ -82,7 +94,9 @@ def info(db,request_id):
     check=db.execute('SELECT state FROM credit_checks WHERE request_id=?',(request_id,)).fetchone()
     return {'state':state,'listing_url':row['listing_url'],'credit_reserved':state=='pending' and bool(check and check['state']=='reserved'),
             'credit_state':check['state'] if check else 'not_required',
-            'buyer_funded':True,'expires':row['expires']}
+            'buyer_funded':True,'expires':row['expires'], 'retake':retake,
+            'can_cancel':not retake and not row['submitted'] and state=='pending',
+            'can_decline':not retake and not row['submitted'] and state=='pending'}
 
 
 def close(db,request_id,state,*,now=None):
@@ -91,7 +105,18 @@ def close(db,request_id,state,*,now=None):
     schema(db)
     row=db.execute('SELECT b.*,r.submitted,r.status FROM ih_buyer_requests b JOIN ih_requests r ON r.id=b.request_id WHERE b.request_id=?',(request_id,)).fetchone()
     if not row:
-        raise HTTPException(404,'Buyer request not found')
+        # A derived take inherits funding, never the original refundable hold.
+        item=info(db,request_id)
+        capture=db.execute('SELECT submitted,status FROM ih_requests WHERE id=?',(request_id,)).fetchone()
+        if not item or not item.get('retake') or not capture:
+            raise HTTPException(404,'Buyer request not found')
+        if capture['submitted']:
+            raise HTTPException(409,'This recording is already submitted; its comparison will continue')
+        if capture['status'] not in {'cancelled','declined','expired'}:
+            db.execute('UPDATE ih_requests SET status=? WHERE id=? AND submitted IS NULL',(state,request_id))
+            db.execute('DELETE FROM ih_scan_chunks WHERE session_id IN (SELECT id FROM ih_sessions WHERE request_id=?)',(request_id,))
+            db.execute('DELETE FROM ih_scan_previews WHERE session_id IN (SELECT id FROM ih_sessions WHERE request_id=?)',(request_id,))
+        return info(db,request_id)
     if row['submitted'] or row['status'] not in {'waiting','capturing','expired','cancelled','declined'}:
         raise HTTPException(409,'This recording is already submitted; its comparison will continue')
     if row['state']!='pending':

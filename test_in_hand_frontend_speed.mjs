@@ -121,10 +121,10 @@ function resultHarness(){
   const context=vm.createContext({AbortController,JSON,Date,Map,Set,Error,encodeURIComponent,...timers,
     api:(path,options)=>{const request=deferred();requests.push({path,options,...request});return request.promise;},
     shell:html=>rendered.push(html),$:()=>null,eligiblePhotoIndices:()=>new Set(),publicationPhotoIndex:()=>0,
-    photoResultCards:()=>'',qualityRetryReason:()=>null,esc:value=>String(value??''),notice:()=>'',scope:'scope',
+    photoResultCards:()=>'',qualityRetryReason:()=>null,captureRetryBox:()=>'',captureAttemptLabel:()=>'',rootPhotoRetryPanel:()=>'',captureNavigation:()=>'',processingActivity:()=>'',reportFingerprint:record=>JSON.stringify(record),photoMatchScope:()=>'',bindCaptureRetry(){},esc:value=>String(value??''),notice:()=>'',scope:'scope',
     savedSubmissions:new Map(),queueInfo:()=>null,queuePresentation:()=>null,queueKicker:()=>'',
     bindLinkButtons(){},bindMarkedDownloads(){},verifiedPhotoSet:()=>'',appLink:()=>'',watchSellerEvents(){},closeSellerEvents(){}});
-  vm.runInContext('let routeNumber=1,poll=null,sellerResultNumber=0,sellerResultRequest=null,sellerData={media:[]},sellerEvents=null,browserAccess={records:{}},standalone={};const secretPattern=/^[A-Za-z0-9_-]{43}$/;'+between('  async function showSellerResult(','  function voiceEnabled()')+'globalThis.run=showSellerResult;globalThis.navigate=()=>routeNumber++;globalThis.setStream=()=>sellerEvents={};',context);
+  vm.runInContext('let routeNumber=1,poll=null,sellerResultNumber=0,sellerResultRequest=null,sellerResultPainted=null,sellerData={media:[]},sellerEvents=null,browserAccess={records:{}},standalone={};const secretPattern=/^[A-Za-z0-9_-]{43}$/;'+between('  async function showSellerResult(','  function voiceEnabled()')+'globalThis.run=showSellerResult;globalThis.navigate=()=>routeNumber++;globalThis.setStream=()=>sellerEvents={};',context);
   return {context,timers,requests,rendered};
 }
 function processingResult(){return {...processing,id:'request',total_count:1,verified_count:0,photos:[{photo_index:0,finding:'not_established',evidence:''}],eligible_photo_indices:[],summary:'Checking'};}
@@ -152,6 +152,12 @@ test('healthy SSE keeps only a recovery watchdog; absent SSE retains fast pollin
   }
 });
 
+test('unchanged pending results preserve activity DOM and selection controls until a real server state changes',async()=>{
+  const {context,requests,rendered}=resultHarness();let task=context.run('token',1,Date.now());requests[0].resolve({json:async()=>processingResult()});await task;assert.equal(rendered.length,1);
+  task=context.run('token',1,Date.now());requests[1].resolve({json:async()=>processingResult()});await task;assert.equal(rendered.length,1);
+  task=context.run('token',1,Date.now());requests[2].resolve({json:async()=>({...processingResult(),analysis_status:'processing'})});await task;assert.equal(rendered.length,2);
+});
+
 const qualityContext=vm.createContext({});
 vm.runInContext(between('  function qualityRetryReason(result){','  async function showSeller(')+'globalThis.reason=qualityRetryReason;',qualityContext);
 const qualityResult=()=>({status:'inconclusive',analysis_status:'complete',verified_count:0,eligible_photo_indices:[],publication_status:'not_eligible',photos:[{finding:'not_established'}],capture_retry_reason:'low_light'});
@@ -176,14 +182,14 @@ function captureHarness({serverReason,query=''}={}){
   class Recorder{static isTypeSupported(){return true;}constructor(){this.state='inactive';}start(){this.state='recording';calls.recordings++;}stop(){this.state='inactive';}}
   const captureAPI={stopRecorder(){},createLightCycle(){calls.cycles++;return {supported:true,start(){calls.starts++;},finish(){},disable(){}};}};
   const win={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:captureAPI,innerHeight:800,innerWidth:400,addEventListener(){},speechSynthesis:{}};
-  const detail={id:'inspection',status:'waiting',capture_mode:'handheld',media:[],auto_publish:true,...(serverReason?{capture_retry_reason:serverReason}:{})};
+  const detail={id:'inspection',status:'waiting',capture_mode:'handheld',media:[],auto_publish:true,capture_retry:{attempt_number:serverReason?2:1,max_attempts:3,remaining_attempts:serverReason?1:2,allowed:false,action:'none',next_attempt_number:null,light_assist_reason:['low_light','motion_blur'].includes(serverReason)?serverReason:null},...(serverReason?{capture_retry_reason:serverReason}:{})};
   const context=vm.createContext({AbortController,JSON,Date,Promise,Error,encodeURIComponent,...timers,setInterval:()=>99,clearInterval(){},
     performance:{now:()=>1000},document:{hidden:false},window:win,MediaRecorder:Recorder,LockXCapture:captureAPI,
     navigator:{mediaDevices:{getUserMedia:async()=>stream}},location:{hash:'#in-hand/capture/token',search:query},
     localStorage:{setItem(){}},$:element,api:async path=>({json:async()=>path.endsWith('/video/start')?{session_id:'session',stage:{instruction:'Turn item'}}:detail}),
     shell(){},notice:()=>'',esc:value=>String(value),voiceEnabled:()=>false,renderCamera(){},positionReticle(){},speak(){},pumpChunks(){},enqueueChunks(){},renderUploadStatus(){},updateCameraFeedback(){},requestCaptureLocation(){},prepareCaptureLocation:async()=>true,
     errorAt:(selector,error)=>calls.errors.push(error.message),stopCapture(){},captureFailed:message=>calls.errors.push(message),showSellerResult(){},finishCapture(){}});
-  vm.runInContext("let captureStartNumber=0,routeNumber=1,isStandalone=true,capture=null,sellerToken=null,sellerData=null,retryLightToken=null,retryConsentToken=null,autoStartRetryToken=null,browserAccess={records:{}};const secretPattern=/^[A-Za-z0-9_-]{43}$/,base='/api/v1/in-hand';"+
+  vm.runInContext("let captureStartNumber=0,routeNumber=1,isStandalone=true,capture=null,sellerToken=null,sellerData=null,retryLightToken=null,retryConsentToken=null,autoStartRetryToken=null,browserAccess={records:{}};const knownCaptureRoots=new Map(),secretPattern=/^[A-Za-z0-9_-]{43}$/,base='/api/v1/in-hand';"+
     between('  function hasLocalCaptureConsent(','  function closeSellerEvents(){')+
     between('  function activeCapture(current){','  function stopQualityLoop(')+
     between('  async function startCapture() {','  function renderCamera(current)')+

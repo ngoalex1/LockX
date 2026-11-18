@@ -140,9 +140,15 @@ def bind_check(db, request_id, owner):
 
 def bind_quality_retry(db, parent_id, child_id):
     schema(db)
+    import capture_attempts
+    root, _ = capture_attempts.family(db,parent_id)
+    parent_id = root["id"]
     parent = db.execute("SELECT * FROM credit_checks WHERE request_id=?", (parent_id,)).fetchone()
     if parent:
-        # Only the existing server-approved, one-time same-photo retry gets this exemption.
+        child=db.execute("SELECT owner_id FROM ih_requests WHERE id=?",(child_id,)).fetchone()
+        if parent["state"] not in {"reserved","consumed"} or not child or child["owner_id"] != parent["owner_id"]:
+            raise HTTPException(409,"The original verification credit does not cover this attempt")
+        # Every server-approved included child belongs to the one charged root.
         db.execute("INSERT INTO credit_checks VALUES (?,?, 'included',?,?)",
                    (child_id, parent["owner_id"], parent_id, time.time()))
 
