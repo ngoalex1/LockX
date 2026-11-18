@@ -477,3 +477,55 @@ body.ih-scanning,
 .ih-page .ih-working-status small,#ihStandalone .ih-working-status small{font-size:11px;line-height:1.5;color:var(--ih-muted,#6e5658)}
 @keyframes ih-verification-working{0%,75%,100%{transform:translateY(0);opacity:.4}35%{transform:translateY(-2px);opacity:1}}
 @media(prefers-reduced-motion:reduce){.ih-page .ih-working-dots i,#ihStandalone .ih-working-dots i{animation:none;transform:none;opacity:.7}}
+
+/* One recording action; real listing photos replace a simulated camera preview. */
+#ihStandalone .ih-simple-capture{max-width:540px;padding:26px 22px 32px}
+#ihStandalone .ih-capture-title h1{margin:0 0 8px;font:400 36px/1.1 Georgia,"Times New Roman",serif;letter-spacing:-1px}
+#ihStandalone .ih-capture-title>p{margin:0 0 20px;font-size:14px;line-height:1.5}
+#ihStandalone .ih-buyer-recording-note{font-size:12px;line-height:1.5;margin:0 0 14px}
+#ihStandalone .ih-capture-reference-stage{padding:14px;border:1px solid var(--ih-line,#dbc5bf);border-radius:16px;background:var(--lx-panel,#e8d6d0)}
+#ihStandalone .ih-capture-reference-head{display:flex;justify-content:space-between;gap:12px;color:var(--ih-ink,#342726);font-size:12px;line-height:1.5}
+#ihStandalone .ih-simple-capture .ih-seller-refs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:12px 0 0;overflow:visible}
+#ihStandalone .ih-simple-capture .ih-seller-refs figure{min-width:0;position:relative;margin:0}
+#ihStandalone .ih-simple-capture .ih-seller-refs figure:first-child{grid-column:1/-1}
+#ihStandalone .ih-simple-capture .ih-seller-refs img{display:block;width:100%;height:62px;object-fit:contain;background:#fffdf8;border:0;border-radius:9px}
+#ihStandalone .ih-simple-capture .ih-seller-refs figure:first-child img{height:194px}
+#ihStandalone .ih-simple-capture .ih-seller-refs figcaption{position:absolute;left:6px;bottom:5px;margin:0;padding:2px 5px;border-radius:4px;background:#fffdf8ec;color:#594649;font-size:11px}
+#ihStandalone .ih-capture-reference-stage>p{margin:11px 0 0;font-size:12px;line-height:1.45}
+#ihStandalone .ih-simple-capture .ih-seller-consent{margin:15px 0;gap:9px;font-size:12px;line-height:1.5}
+#ihStandalone .ih-simple-capture .ih-seller-consent input{width:18px;height:18px}
+#ihStandalone .ih-simple-capture .ih-seller-consent small{display:block;font-size:11px;line-height:1.5}
+#ihStandalone .ih-simple-capture #ihStartCapture{min-height:52px;margin-top:2px;border-radius:30px;font-size:16px}
+#ihStandalone .ih-simple-capture .ih-scan-target{margin:10px auto!important;font-size:12px!important}
+#ihStandalone .ih-simple-capture .ih-capture-options{margin:10px 0 0}
+#ihStandalone .ih-simple-capture .ih-capture-options p{font-size:13px;line-height:1.6}
+#ihStandalone .ih-simple-capture .ih-capture-consent-note{font-size:12px!important;line-height:1.5;margin:13px 0!important}
+#ihStandalone .ih-working-details{margin-top:7px;color:var(--ih-muted,#6e5658)}
+#ihStandalone .ih-working-details>summary{display:inline-flex;align-items:center;min-height:44px;font-size:12px;cursor:pointer}
+#ihStandalone .ih-simple-results{max-width:600px;padding-top:28px}
+#ihStandalone .ih-simple-results h1{font:400 36px/1.12 Georgia,"Times New Roman",serif;margin:12px 0}
+#ihStandalone .ih-simple-results>p{font-size:14px;line-height:1.6}
+#ihStandalone .ih-simple-results .ih-result-details{margin:13px 0}
+#ihStandalone .ih-simple-results .ih-photo-review>summary{font-size:14px;min-height:48px;font-weight:500;color:var(--ih-ink,#342726)}
+#ihStandalone .ih-simple-results .ih-working-status{padding:14px;margin:18px 0}
+#ihStandalone .ih-simple-results .ih-working-heading strong{font-weight:500}
+#ihStandalone .ih-simple-results .ih-verified-actions{gap:8px}
+#ihStandalone .ih-simple-results .ih-verified-actions>[data-save-all-photos]{flex-basis:100%;min-height:52px;border-radius:30px}
+#ihStandalone .ih-simple-results .ih-verified-actions>[data-copy]{background:transparent;border-color:transparent;color:var(--ih-ink,#342726);font-size:13px}
+#ihStandalone .ih-photo-match-details{margin:7px 0 10px;font-size:12px;line-height:1.6}
+#ihStandalone .ih-photo-match-details>summary{min-height:36px;display:list-item;cursor:pointer;color:var(--ih-muted,#6e5658)}
+#ihStandalone .ih-photo-match-details>span{display:block;margin:5px 0}
+#ihStandalone .ih-simple-results .ih-result-scope{font-size:11px;line-height:1.6;color:var(--ih-muted,#6e5658);margin-top:22px}
+#ihStandalone .ih-simple-camera .ih-scan-instruction h2{font-size:20px!important;margin:5px 0 8px!important}
+#ihStandalone .ih-simple-camera .ih-video-countdown{font-size:32px;margin:8px 0;font-variant-numeric:tabular-nums}
+#ihStandalone .ih-simple-camera .ih-scan-instruction p{font-size:14px!important;line-height:1.5!important}
+#ihStandalone .ih-simple-camera .ih-scan-feedback{min-height:18px;margin:8px 0;font-size:11px}
+#ihStandalone .ih-simple-camera .ih-reference-chips{gap:6px;margin:10px 0}
+#ihStandalone .ih-simple-camera .ih-reference-chip{max-width:47px;padding:2px}
+#ihStandalone .ih-simple-camera .ih-reference-chip>img{height:33px}
+#ihStandalone .ih-simple-camera .ih-camera-details{color:#e5e5ea;font-size:11px;text-align:center}
+#ihStandalone .ih-simple-camera .ih-camera-details>summary{display:inline-flex;align-items:center;min-height:44px;cursor:pointer}
+#ihStandalone .ih-simple-camera .ih-scan-footer{min-height:44px}
+#ihStandalone .ih-simple-camera .ih-scan-footer>button{min-height:44px}
+@media(max-width:350px){#ihStandalone .ih-simple-capture{padding:22px 16px 28px}#ihStandalone .ih-capture-title h1,#ihStandalone .ih-simple-results h1{font-size:32px}#ihStandalone .ih-simple-capture .ih-seller-refs figure:first-child img{height:166px}#ihStandalone .ih-simple-capture .ih-seller-consent{font-size:11px}}
+@media(max-height:700px){#ihStandalone .ih-simple-camera .ih-video-countdown{font-size:27px;margin:5px 0}#ihStandalone .ih-simple-camera .ih-scan-instruction h2{font-size:18px!important}#ihStandalone .ih-simple-camera .ih-scan-instruction p{font-size:12px!important}#ihStandalone .ih-simple-camera .ih-reference-chip>img{height:25px}#ihStandalone .ih-simple-camera .ih-reference-chips{margin:7px 0}}

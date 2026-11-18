@@ -14,6 +14,7 @@ import tempfile
 import time
 import zipfile
 import capture_attempts
+import evidence_selection
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
@@ -323,6 +324,22 @@ class IdentifierCheck(BaseModel):
     frame_indices: list[int]
 
 
+class PhotoConcern(BaseModel):
+    """Negative evidence scoped to one supplied reference, never a global override."""
+    model_config = ConfigDict(extra="forbid",strict=True)
+    photo_index: StrictInt = Field(ge=0)
+    reason: Literal["identifier_unreadable","missing_view","local_visibility","local_quality"]
+    frame_indices: list[StrictInt] = Field(min_length=1,max_length=6)
+    evidence: str = Field(min_length=1,max_length=240)
+
+    @field_validator("evidence")
+    @classmethod
+    def meaningful_evidence(cls,value):
+        if not value.strip():
+            raise ValueError("Describe the directly observed local issue")
+        return value
+
+
 class VisualAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     same_item: Literal["supported", "contradicted", "inconclusive"]
@@ -332,6 +349,7 @@ class VisualAssessment(BaseModel):
     photos: list[PhotoFinding]
     claims: list[Finding]
     concerns: list[str]
+    photo_concerns: list[PhotoConcern] = Field(default_factory=list,max_length=12)
     summary: str
     identifier_checks: list[IdentifierCheck] = Field(default_factory=list, max_length=40)
     capture_failure_reason: Literal["low_light", "motion_blur", "missing_views", "other"] | None = None
@@ -958,7 +976,8 @@ def examine_scan_video(content, session):
                 raise HTTPException(415,"This recording could not be decoded. Record again in Safari or Chrome.")
             if width * height > 9_000_000:
                 raise HTTPException(422,"Record at 1080p or lower.")
-            decoded, candidates, next_fixed_sample = 0, [], 0.0
+            decoded, candidates = 0, []
+            sampler=evidence_selection.SharpWindowSampler() if fixed_video else None
             sample_every = max(1,round(fps/2))
             while True:
                 ok, frame = cap.read()
@@ -968,10 +987,11 @@ def examine_scan_video(content, session):
                 if decoded/fps > session["scan_max_seconds"] + 12:
                     raise HTTPException(422,"Keep the continuous camera scan within ninety seconds.")
                 seconds = (decoded-1)/fps
-                should_sample = seconds+1e-6 >= next_fixed_sample if fixed_video else (decoded-1) % sample_every == 0
+                if fixed_video:
+                    sampler.consider(frame,seconds)
+                    continue
+                should_sample = (decoded-1) % sample_every == 0
                 if should_sample:
-                    if fixed_video:
-                        next_fixed_sample += .5
                     h,w = frame.shape[:2]
                     scale = min(1,1100/max(h,w))
                     if scale < 1:
@@ -980,6 +1000,11 @@ def examine_scan_video(content, session):
                     if not ok:
                         raise HTTPException(415,"A camera frame could not be decoded")
                     candidates.append((seconds,jpeg.tobytes()))
+            if fixed_video:
+                try:
+                    candidates=sampler.finish()
+                except ValueError as exc:
+                    raise HTTPException(415,"A camera frame could not be decoded") from exc
             duration = decoded/fps
             # MP4 normally has an exact count; streaming WebM can omit or invent it.
             # Browser MP4 encoders may leave a short padded tail at stop; the
@@ -1023,7 +1048,8 @@ def examine_scan_video(content, session):
             return frames,{"duration_seconds":round(duration,2),"decoded_frames":decoded,"sampled_frames":len(frames),
                            "quality_diagnostics":capture_quality_diagnostics(frames,quality_checks),
                            "notes":notes,"capture_integrity":"unattested_browser_recording","depth":"not_captured",
-                           "capture_mode":"continuous_scan"}
+                           "capture_mode":"continuous_scan",
+                           **({"candidate_frames_examined":sampler.examined,"frame_sampling":"sharpest_real_half_second_window"} if fixed_video else {})}
         finally:
             cap.release()
 
@@ -1130,69 +1156,32 @@ def prepare_reference_features(request_id):
 
 
 def select_evidence_frames(refs, frames, max_frames=12):
-    """Rank real extracted frames, never use feature similarity as an item verdict.
-
-    All extracted frames remain stored. Returned indices always address that full
-    stored sequence, including when only a subset is sent for visual comparison.
-    """
-    started = perf_counter()
-    count = len(frames)
-    limit = min(count, max(1, int(max_frames)))
-    metadata = {"total_frames":count, "selected_frames":0, "selected_frame_indices":[],
-                "reference_best_frames":[], "selection_ms":0, "method":"all_frames"}
-    if count <= limit:
-        selected = list(range(count))
+    """Select real saved frames; coverage hints never establish an item match."""
+    started=perf_counter()
+    count=len(frames)
+    limit=min(count,max(1,int(max_frames)))
+    metadata={"total_frames":count,"selected_frames":0,"selected_frame_indices":[],
+              "reference_best_frames":[],"selection_ms":0,"method":"all_frames"}
+    if count<=limit:
+        selected=list(range(count))
     else:
-        frame_features = [media_features(frame) for frame in frames]
-        matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
-        rankings = []
+        features=[media_features(frame) for frame in frames]
+        rankings=[]
         for reference in refs:
-            points, descriptors, _ = reference_features(reference)
-            scores = []
-            for index, (other_points, other_descriptors, quality) in enumerate(frame_features):
-                matches = []
-                inliers = 0
-                if descriptors is not None and other_descriptors is not None and len(descriptors) >= 8 and len(other_descriptors) >= 8 and quality > 0:
-                    try:
-                        matches = [pair[0] for pair in matcher.knnMatch(descriptors, other_descriptors, k=2)
-                                   if len(pair) == 2 and pair[0].distance < .75 * pair[1].distance]
-                        if len(matches) >= 6:
-                            source = np.float32([points[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                            target = np.float32([other_points[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-                            transform, mask = cv2.findHomography(source, target, cv2.RANSAC, 4, maxIters=500)
-                            if transform is not None and mask is not None:
-                                inliers = int(mask.sum())
-                    except cv2.error:
-                        pass
-                # A coherent feature arrangement ranks a view; it establishes
-                # neither legibility, identity, chronology nor authenticity.
-                score = inliers * (.4 + .6 * quality) if inliers >= 5 else 0
-                scores.append((score, inliers, index))
-            rankings.append(sorted(scores, reverse=True))
-        anchors = list(dict.fromkeys((0, count//2, count-1)))[:limit]
-        chosen = set(anchors)
-        # Give every reference its strongest view before adding a second view.
-        for rank in (0, 1):
-            for ranking in rankings:
-                candidates = [entry for entry in ranking if entry[0] > 0]
-                if len(candidates) > rank and len(chosen) < limit:
-                    chosen.add(candidates[rank][2])
-        # Untextured/unreadable references cannot be localized by ORB. Keep
-        # distributed fallback evidence rather than guessing their surface.
-        evenly_spaced = [round(i*(count-1)/(limit-1)) for i in range(limit)] if limit > 1 else [0]
-        for index in evenly_spaced:
-            if len(chosen) < limit:
-                chosen.add(index)
-        selected = sorted(chosen)
-        has_features = any(ranking and ranking[0][0] > 0 for ranking in rankings)
-        metadata["method"] = "reference_features_with_timeline" if has_features else "timeline_fallback"
-        for photo_index, ranking in enumerate(rankings):
-            matched = [entry for entry in ranking if entry[0] > 0 and entry[2] in chosen][:2]
-            metadata["reference_best_frames"].append({"photo_index":photo_index,
-                "frame_indices":[entry[2] for entry in matched], "feature_matches":matched[0][1] if matched else 0})
-    metadata.update(selected_frames=len(selected), selected_frame_indices=selected,
-                    selection_ms=round((perf_counter()-started)*1000, 2))
-    return selected, metadata
+            reference_inputs=reference_features(reference)
+            rankings.append([{**evidence_selection.correspondence(reference_inputs,feature),"index":index}
+                             for index,feature in enumerate(features)])
+        selected,ranked=evidence_selection.choose_frames(rankings,frames,limit)
+        useful=any(entry['score']>0 for ranking in ranked for entry in ranking)
+        metadata['method']='reference_geometry_with_diverse_timeline' if useful else 'timeline_fallback'
+        for photo_index,ranking in enumerate(ranked):
+            matched=[item for item in ranking if item['score']>0 and item['index'] in selected][:3]
+            metadata['reference_best_frames'].append({'photo_index':photo_index,
+                'frame_indices':[item['index'] for item in matched],
+                'feature_matches':matched[0]['inliers'] if matched else 0})
+    metadata.update(selected_frames=len(selected),selected_frame_indices=selected,
+                    selection_ms=round((perf_counter()-started)*1000,2))
+    return selected,metadata
 
 
 def identifier_verdict(checks, photo_count, allowed_frame_indices=None):
@@ -1253,6 +1242,18 @@ def align_identifier_photo_findings(visual):
             photo.frame_indices = check.frame_indices[:]
 
 
+def scoped_photo_issues(visual,photo_count,allowed_frame_indices=None):
+    """Validate additive local negatives without changing the model's base findings."""
+    allowed=set(allowed_frame_indices) if allowed_frame_indices is not None else None
+    issues={}
+    for concern in visual.photo_concerns:
+        if (not 0<=concern.photo_index<photo_count or not concern.frame_indices
+                or any(type(i) is not int or i<0 or (allowed is not None and i not in allowed) for i in concern.frame_indices)):
+            raise ValueError("Invalid scoped photo concern")
+        issues.setdefault(concern.photo_index,concern)
+    return issues
+
+
 def recommendation(visual, photo_count, checks):
     if visual.same_item == "contradicted" or any(f.finding == "contradicted" for f in [*visual.photos,*visual.claims]):
         return "mismatch"
@@ -1260,6 +1261,11 @@ def recommendation(visual, photo_count, checks):
                                     (checks.get("frame_selection") or {}).get("selected_frame_indices"))
     if identifiers:
         return identifiers
+    try:
+        if scoped_photo_issues(visual,photo_count,(checks.get("frame_selection") or {}).get("selected_frame_indices")):
+            return "inconclusive"
+    except (ValueError,TypeError):
+        return "inconclusive"
     if (visual.same_item == "supported" and len({d.strip().lower() for d in visual.distinguishing_details if len(d.strip()) >= 8}) >= 2
             and visual.challenge_actions == "followed" and visual.continuity == "consistent"
             and not visual.concerns and not checks.get("notes")
@@ -1363,7 +1369,10 @@ def analyze(request_id, queue_claim=None):
             "No authenticity, ownership, internal-function, current-possession or delivery certification. "
             "Briefly state in summary that sampled browser video cannot attest live/uncut capture or resistance to injection/deepfakes. "
             "Reserve concerns for shared capture or item-identity problems affecting every reference, such as substitution, inconsistent continuity or an unfulfilled challenge. "
-            "Put a reference-specific mismatch or missing view in that photo's finding/evidence, not concerns. "
+            "Use photo_concerns for reference-specific unreadable identifiers, a missing view, local visibility or local quality; each needs its zero-based photo_index and actual supplied frame citations. "
+            "Also mark that affected photo not_established and include its identifier_checks where appropriate. A readable different identifier remains contradicted, not merely a local visibility issue. "
+            "Do not treat an unreadable identifier on one reference as a global concern for views where it is absent. Never narrow a genuine substitution, continuity or whole-item identity problem to one reference. "
+            "Keep truly global concerns in concerns; structured local issues cannot cancel a global concern or override any contradiction. "
             "A photos finding of supported means that reference independently matches the same individual item, even when another reference differs. "
             "same_item summarizes the complete reference set and may be contradicted or inconclusive when only some references fail. Insufficient evidence is inconclusive. "
             "Set capture_failure_reason to low_light or motion_blur ONLY when the supplied quality_diagnostics.retry_reason agrees, every reference view was attempted, "
@@ -1379,8 +1388,9 @@ def analyze(request_id, queue_claim=None):
         analysis["video"]["vision_ms"] = round((perf_counter()-comparison_started)*1000, 2)
         if {p.photo_index for p in visual.photos} != set(range(len(refs))) or len(visual.photos) != len(refs):
             raise ValueError("Missing reference findings")
-        if any(type(i) is not int or i not in selected for f in [*visual.photos,*visual.claims,*visual.identifier_checks] for i in f.frame_indices):
+        if any(type(i) is not int or i not in selected for f in [*visual.photos,*visual.claims,*visual.identifier_checks,*visual.photo_concerns] for i in f.frame_indices):
             raise ValueError("Invalid frame reference")
+        scoped_photo_issues(visual,len(refs),selected)
         if any(type(check.photo_index) is not int or not 0 <= check.photo_index < len(refs) for check in visual.identifier_checks):
             raise ValueError("Invalid identifier reference photo")
         if not identifier_text_allowed(listing):
@@ -1648,7 +1658,7 @@ def photo_eligibility(db, row):
                 or visual.challenge_actions != "followed" or visual.continuity != "consistent"
                 or len({d.strip().lower() for d in visual.distinguishing_details if len(d.strip()) >= 8}) < 2
                 or len(visual.photos) != count or {p.photo_index for p in visual.photos} != set(range(count))
-                or any(type(i) is not int or i not in allowed for f in [*visual.photos,*visual.claims,*visual.identifier_checks] for i in f.frame_indices)
+                or any(type(i) is not int or i not in allowed for f in [*visual.photos,*visual.claims,*visual.identifier_checks,*visual.photo_concerns] for i in f.frame_indices)
                 or any(c.finding != "supported" or not c.frame_indices for c in visual.claims)
                 or ((listing.get("description") or listing.get("details")) and not visual.claims)):
             return empty
@@ -1660,7 +1670,8 @@ def photo_eligibility(db, row):
         # cannot turn an unsupported identity assessment into an all-photo pass.
         if visual.same_item != "supported" and all(p.finding == "supported" for p in visual.photos):
             return empty
-        eligible = sorted(p.photo_index for p in visual.photos if p.finding == "supported" and p.frame_indices)
+        local_issues=scoped_photo_issues(visual,count,allowed)
+        eligible = sorted(p.photo_index for p in visual.photos if p.finding == "supported" and p.frame_indices and p.photo_index not in local_issues)
         return {"eligible_photo_indices":eligible,"verified_count":len(eligible),"total_count":count,
                 "partial":bool(eligible) and len(eligible) < count}
     except (ValidationError,ValueError,TypeError,KeyError,AttributeError):
@@ -1928,6 +1939,13 @@ def seller_result_payload(db, row):
     visual = analysis.get("visual") or {}
     frame_count=db.execute("SELECT COUNT(*) FROM ih_media WHERE request_id=? AND role='frame'",(row["id"],)).fetchone()[0]
     selected=((analysis.get("video") or {}).get("frame_selection") or {}).get("selected_frame_indices")
+    local_issues={}
+    malformed_local=False
+    if 'photo_concerns' in visual:
+        try:
+            local_issues=scoped_photo_issues(VisualAssessment.model_validate(visual),count,selected if selected is not None else range(frame_count))
+        except (ValidationError,ValueError,TypeError):
+            malformed_local=True
     for photo in visual.get("photos") or []:
         if not isinstance(photo,dict):
             continue
@@ -1935,6 +1953,9 @@ def seller_result_payload(db, row):
         if type(index) is int and 0 <= index < count and photo.get("finding") in {"supported","contradicted","not_established"}:
             findings[index] = {"photo_index":index,"finding":photo["finding"],"evidence":str(photo.get("evidence") or ""),
                                "match_percentage":photo_match_percentage(visual,photo,frame_count,selected)}
+            if photo['finding']!='contradicted' and (malformed_local or index in local_issues):
+                issue=local_issues.get(index)
+                findings[index].update(finding='not_established',evidence=issue.evidence if issue else 'Scoped comparison evidence could not be validated.')
     identifiers = []
     if identifier_text_allowed(json.loads(row["listing"])):
         for raw in visual.get("identifier_checks") or []:

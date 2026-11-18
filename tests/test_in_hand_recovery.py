@@ -373,7 +373,12 @@ def test_fixed_video_accepts_short_encoder_padding_but_rejects_material_truncati
     monkeypatch.setattr(ih.cv2,"VideoCapture",PaddedCapture)
     clock[0] += 10.1
     assert chunk(client,record,stage,0,content).status_code == 200
-    model_ready(monkeypatch,assessment())
+    supported = assessment()
+    for photo in supported.photos:
+        # This regression isolates decoder padding, not adaptive frame ranking.
+        # The real first timeline anchor is always supplied to the comparison.
+        photo.frame_indices = [0]
+    model_ready(monkeypatch,supported)
     assert finish(client,record,stage,recording_seconds=10).status_code == 202
     final = detail(client,record)
     assert final["status"] == expected_status

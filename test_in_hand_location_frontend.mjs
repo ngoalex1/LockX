@@ -113,10 +113,11 @@ test('a position timeout after permission allows a fresh optional fix during rec
   }
 });
 
-function recordingHarness({cameraPending=false}={}){
+function recordingHarness({cameraPending=false,locationOptIn=true}={}){
   const elements=new Map(),windowEvents=new Map(),documentEvents=new Map(),positions=[],timers=new Map();
   const calls={camera:0,recordings:0,stops:0,errors:[],requests:[]};let serial=0,resolveCamera;
   const element=selector=>{if(!elements.has(selector))elements.set(selector,{checked:true,disabled:false,hidden:false,textContent:'',dataset:{},style:{},play:async()=>{}});return elements.get(selector);};
+  element('#ihLocationConsent').checked=locationOptIn;
   const track={stop(){calls.stops++;}},stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
   class Recorder{static isTypeSupported(){return true;}constructor(){this.state='inactive';}start(){this.state='recording';calls.recordings++;}stop(){this.state='inactive';}}
   const win={isSecureContext:true,MediaRecorder:Recorder,LockXCapture:{stopRecorder(){}},innerHeight:800,innerWidth:400,
@@ -143,6 +144,15 @@ function recordingHarness({cameraPending=false}={}){
   return {context,calls,positions,button:element('#ihStartCapture'),hide(kind){doc.hidden=true;if(kind==='pagehide')windowEvents.get('pagehide')({});else documentEvents.get('visibilitychange')({});},
     show(){doc.hidden=false;},resolveCamera(){resolveCamera(stream);}};
 }
+
+test('default-off location skips permission prompts and location requests even when the browser previously granted access',async()=>{
+  const h=recordingHarness({locationOptIn:false});
+  h.context.navigator.permissions.query=async()=>{assert.fail('No location permission lookup without explicit opt-in');};
+  await h.context.start();
+  assert.equal(h.positions.length,0);assert.equal(h.calls.camera,1);assert.equal(h.calls.recordings,1);
+  assert.equal(h.calls.requests.some(path=>path.endsWith('/location')),false);
+  h.context.stop();
+});
 
 test('pagehide or backgrounding during a permission prompt prevents late Allow from opening the camera',async()=>{
   for(const kind of ['pagehide','visibilitychange']){

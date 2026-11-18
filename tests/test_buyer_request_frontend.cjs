@@ -54,7 +54,7 @@ function harness(options={}) {
     querySelector(selector){return nodes.get(selector)||null;}
     querySelectorAll(selector){return selector==='input,select,[data-remove],[data-select],#ihChoosePhotos,#ihLoadListingPhotos'?['#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihChoosePhotos','#ihLoadListingPhotos'].map(id=>nodes.get(id)):[];}
   }
-  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerMessageReview','#ihMarketplaceCopyStatus','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence','#ihRetryCapture','#ihRetryCaptureConsent','#ihQualityRetryError','#ihRetryAnalysis','#ihRetrySelectionLabel'])nodes.set(id,new Element());
+  for(const id of ['main','#ihStandalone','#ihRequestForm','#ihChoosePhotos','#ihPhotoInput','#ihPhotoGrid','#ihLoadListingPhotos','#ihListingImportStatus','#ihMarketplacePolicy','#ihPhotoError','#ihCreate','#ihCreateError','#ihCreated','#ihListingURL','#ihBuyerTitle','#ihBuyerCaptureMode','#ihServiceState','#ihExport','.ih-report-head','#ihCopyBuyerMessage','#ihShareBuyerMessage','#ihCancelBuyerRequest','#ihBuyerMessage','#ihBuyerMessageReview','#ihMarketplaceCopyStatus','#ihBuyerActionError','#ihSellerEmail','#ihSellerEmailRecipient','#ihSellerEmailContact','#ihSellerEmailSubject','#ihSellerEmailBody','#ihSendSellerEmail','#ihOpenSellerEmail','#ihRetrySellerEmailDraft','#ihStartCapture','#ihSellerConsent','#ihShareEvidence','#ihLocationConsent','#ihVoiceConsent','#ihCaptureError','#ihDeclineBuyerRequest','#ihLiveVideo','#ihLightStatus','#ihRecorderState','#ihInstructionTitle','#ihInstruction','.ih-auto-camera','#ihElapsed','#ihRemaining','#ihStepProgress','#ihPublicEvidence','#ihRetryCapture','#ihRetryCaptureConsent','#ihQualityRetryError','#ihRetryAnalysis','#ihRetrySelectionLabel'])nodes.set(id,new Element());
   nodes.get('#ihRequestForm').dataset.buyer='true';nodes.get('#ihBuyerCaptureMode').value='handheld';nodes.get('#ihBuyerTitle').value='Listing camera';nodes.get('#ihListingURL').value='https://market.example/items/123';
   const document={body:new Element(),hidden:false,readyState:'loading',querySelector:selector=>nodes.get(selector)||null,querySelectorAll:selector=>[...nodes.values()].filter(node=>selector==='[data-retry-photo-index]'?node.dataset?.retryPhotoIndex!==undefined:selector==='[data-retry-this-photo]'?node.dataset?.retryThisPhoto!==undefined:selector==='[data-retry-all-failed]'?node.dataset?.retryAllFailed!==undefined:false),createElement:()=>new Element(),addEventListener(){}};
   const stream={getTracks:()=>[{stop(){}}],getVideoTracks:()=>[{stop(){}}]};
@@ -183,7 +183,23 @@ test('capture sends the explicit sharing choice saved before camera rendering cl
   for(const share of [true,false]){
     const h=harness({fetch:async url=>response(url.endsWith('/video/start')?{session_id:'session',stage:{instruction:'Turn item'}}:{})});h.api.setupCapture({id:'self-seller',media:[]});h.nodes.get('#ihShareEvidence').checked=share;await h.api.startCapture();
     const request=h.requests.find(r=>r.url.endsWith('/video/start'));assert.ok(request);assert.deepEqual(JSON.parse(request.init.body),{share_evidence:share});assert.equal(h.nodes.get('#ihShareEvidence').checked,false);assert.equal(h.calls.recording,1);
+    assert.equal(h.nodes.get('#ihInstruction').textContent,'Turn item','The real server-issued movement stays visible while recording');
+    assert.ok([...h.timers.values()].some(timer=>timer.ms===10000),'The independent fixed ten-second stop remains scheduled');
   }
+});
+
+test('simple capture uses actual listing photos and one recording action without requesting camera or location on paint',async()=>{
+  const r=record('pending',{media:[0,1,2,3].map(index=>({id:'listing-photo-'+index})),capture_mode:'handheld'});
+  const h=harness({fetch:async()=>response(r)});await flush();h.api.setRoute(1);await h.api.showSeller(r.token,1);
+  const html=h.nodes.get('#ihStandalone').innerHTML;
+  assert.match(html,/<h1>Show your item\.<\/h1>/);assert.match(html,/A quick video\. LockX handles the matching\./);
+  assert.equal((html.match(/id="ihStartCapture"/g)||[]).length,1);assert.match(html,/id="ihStartCapture">Start recording<\/button>/);
+  assert.equal((html.match(/alt="Reference photo [1-4]"/g)||[]).length,4);assert.ok(html.includes('/photos/listing-photo-0'));
+  assert.match(html,/<details class="ih-result-details ih-capture-options"><summary>Recording details &amp; voice<\/summary>/);
+  for(const id of ['ihSellerConsent','ihShareEvidence','ihLocationConsent']){assert.match(html,new RegExp('id="'+id+'"'));assert.doesNotMatch(html,new RegExp('id="'+id+'"[^>]*checked'));}
+  assert.match(html,/Include city and state/);assert.match(html,/Required for this buyer request/);
+  assert.doesNotMatch(html,/data:image|fine-line|Camera preview|Match these views|Step [1-4]/);
+  assert.equal(h.calls.camera,0);assert.equal(h.requests.filter(request=>request.init.method==='POST').length,0);
 });
 
 test('buyer waiting polls leave copy controls untouched until the server state changes',async()=>{
@@ -523,7 +539,7 @@ test('a concurrent attempt-limit conflict reloads server policy rather than enab
 test('handheld and flat recording guidance matches photo angles while stationary and digital modes preserve their exceptions',async()=>{
   for(const mode of ['handheld','flat','stationary','digital']){
     const h=harness({fetch:async()=>response(attemptRecord(1,{status:'waiting',capture_mode:mode}))});await flush();h.api.setRoute(1);await h.api.showSeller('t'.repeat(43),1);
-    const html=h.nodes.get('#ihStandalone').innerHTML;assert.match(html,/Attempt 1 of 3/);assert.match(html,/Match these views/);assert.match(html,/angle and position shown in each photo/);
+    const html=h.nodes.get('#ihStandalone').innerHTML;assert.match(html,/Attempt 1 of 3/);assert.match(html,/<h1>Show your item\.<\/h1>/);assert.match(html,/A quick video\. LockX handles the matching\./);assert.match(html,/angle and position shown in each photo/);
     if(mode==='stationary'){assert.match(html,/Do not lift or move a heavy appliance/);assert.doesNotMatch(html,/Hold the item in your hand/);}
     else if(mode==='digital'){assert.match(html,/second screen/);assert.match(html,/Hide usable barcodes/);assert.doesNotMatch(html,/Hold the item in your hand/);}
     else {assert.match(html,/Hold the item in your hand/);assert.match(html,/Slowly turn it so every selected view is visible/);}
@@ -646,11 +662,21 @@ test('root overview retains all photo controls instead of redirecting to a narro
 test('processing activity prints actual queue/comparison states without invented logs or numeric progress',()=>{
   const h=harness();
   for(const status of ['queued','decoding','processing','running','pending']){
-    const html=h.api.processingActivity({status:'processing',analysis_status:status,queue:{state:'running',queued_at:1700000000},publication_status:'not_eligible'});assert.ok(html.includes('comparison.state = '+status));assert.match(html,/queue.state = running/);assert.match(html,/ih-working-dots/);assert.doesNotMatch(html,/\d+%|token|frame [0-9]+|estimated|executing|scanning/i);
+    const html=h.api.processingActivity({status:'processing',analysis_status:status,queue:{state:'running',queued_at:1700000000},publication_status:'not_eligible'});assert.ok(html.includes('comparison.state = '+status));assert.match(html,/queue.state = running/);assert.match(html,/ih-working-dots/);assert.match(html,/<details class="ih-working-details"><summary>See matching activity<\/summary>/);assert.doesNotMatch(html,/\d+%|token|frame [0-9]+|estimated|executing|scanning/i);
   }
   assert.equal(h.api.processingActivity({status:'inconclusive',analysis_status:'complete',publication_status:'not_eligible'}),'');assert.equal(h.api.processingActivity({status:'waiting',analysis_status:'pending'}),'');
   assert.doesNotMatch(h.api.processingActivity({status:'processing',analysis_status:'<script>bad'}),/<script>/);
   const css=fs.readFileSync(path.join(__dirname,'..','in-hand.css'),'utf8');assert.match(css,/@media\(prefers-reduced-motion:reduce\).*ih-working-dots[^}]+animation:none/s);
+});
+
+test('verified result puts real photo saving before secondary comparison details and retains nullable score semantics',async()=>{
+  const r=attemptRecord(1,{status:'confirmed',media:[{id:'actual-reference'}],photos:[{photo_index:0,finding:'supported',match_percentage:97,evidence:'The same engraving is visible.'}],eligible_photo_indices:[0],verified_count:1,publication_status:'ready',publication:{id:'actual-proof',photos:[{id:'actual-marked',photo_index:0}]},capture_retry:{attempt_number:1,max_attempts:3,remaining_attempts:2,allowed:false,action:'none',next_attempt_number:null,blocked_reason:'already_confirmed'}});
+  const h=harness({fetch:async()=>response(r)});await flush();h.api.setupCapture(r);await h.api.showSellerResult(r.token,1);
+  const html=h.nodes.get('#ihStandalone').innerHTML;
+  assert.ok(html.indexOf('data-save-all-photos')<html.indexOf('ih-photo-review'));assert.match(html,/data-marked-photo="\/public\/actual-proof\/photos\/actual-marked"/);
+  assert.match(html,/<details class="ih-photo-match-details"><summary>Match details<\/summary><span class="ih-photo-match-score">Visual match · 97%/);
+  assert.match(html,/<details class="ih-result-details ih-photo-review"><summary>Photo results & comparison details<\/summary>/);
+  assert.doesNotMatch(html,/4 photos verified|data:image|id="ihRetryCapture"/);
 });
 
 test('queued root images suppress stale numeric scores and old evidence while preserving already verified source proof',()=>{

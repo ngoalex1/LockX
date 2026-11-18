@@ -211,3 +211,23 @@ test('server-approved quality child capture enables the retry light cycle; unrel
     const expected=['low_light','motion_blur'].includes(reason)?1:0;assert.equal(calls.cycles,expected);assert.equal(calls.starts,expected);
   }
 });
+
+test('minimal recording HUD retains actual countdown, selected references and a visible server-instruction target',()=>{
+  const nodes=new Map(),element=selector=>{if(!nodes.has(selector))nodes.set(selector,{hidden:false,onclick:null});return nodes.get(selector);};
+  const standalone={innerHTML:''},context=vm.createContext({document:{body:{classList:{add(){}}}},standalone,$:element,base:'/api/in-hand',sellerToken:'already-held-capture-token',sellerData:{media:[{id:'actual-reference'}]},rootPhotoIndex:()=>3,window:{speechSynthesis:{}},stopCapture(){},showSeller(){},routeNumber:1,localStorage:{setItem(){}}});
+  vm.runInContext(between('  function renderCamera(current){','  function positionReticle(current){')+'globalThis.render=renderCamera;',context);
+  context.render({voice:false});
+  assert.match(standalone.innerHTML,/id="ihRemaining" role="timer">10s left/);assert.match(standalone.innerHTML,/id="ihInstruction">Keep the item in view\.<\/p>/);
+  assert.ok(standalone.innerHTML.includes('/photos/actual-reference'));assert.match(standalone.innerHTML,/Selected photo 4/);
+  assert.match(standalone.innerHTML,/<details class="ih-camera-details"><summary>Recording details<\/summary>/);assert.doesNotMatch(standalone.innerHTML,/To compare|is-captured|Matched|verified|data:image/i);
+  assert.equal(typeof element('#ihCancelCapture').onclick,'function');assert.equal(typeof element('#ihVoiceToggle').onclick,'function');
+});
+
+test('normal camera quality stays quiet while measured darkness, glare and blur still show their warnings',()=>{
+  const feedback={textContent:''};let metrics={brightness:128,sharpness:50};
+  const context=vm.createContext({$:()=>feedback,sampleQuality:()=>metrics});
+  vm.runInContext(between('  function updateCameraFeedback(current){','  function enqueueChunks(current,blob){')+'globalThis.update=updateCameraFeedback;',context);
+  context.update({});assert.equal(feedback.textContent,'');
+  for(const [sample,message] of [[{brightness:10,sharpness:50},/Add light/],[{brightness:250,sharpness:50},/Reduce glare/],[{brightness:128,sharpness:5},/Move closer/]]){metrics=sample;context.update({});assert.match(feedback.textContent,message);}
+  metrics={brightness:128,sharpness:50};context.update({});assert.equal(feedback.textContent,'','The resolved warning clears without replacing the server movement cue with extra training');
+});
