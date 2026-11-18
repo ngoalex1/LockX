@@ -14,6 +14,7 @@ import tempfile
 import time
 import zipfile
 import capture_attempts
+import verification_notifications
 import evidence_selection
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -151,6 +152,7 @@ def database(*, read_only=False):
     capture_attempts.schema(db)
     public_evidence.ensure_schema(db)
     seller_email.schema(db)
+    verification_notifications.schema(db)
     try:
         yield db
         db.commit()
@@ -1099,6 +1101,7 @@ def finish_scan_background(request_id, session_id, queue_claim=None):
                 analysis.update(result="inconclusive",summary="The recording was received, but it could not be processed as a complete camera scan. Please create a fresh inspection.")
                 db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?",(json.dumps(analysis),request_id))
                 credits.settle_check(db,request_id)
+                verification_notifications.refresh_state(db,request_id,final_failure=True)
             db.execute("UPDATE ih_scan_sessions SET upload_status='failed' WHERE session_id=?",(session_id,))
             db.execute("DELETE FROM ih_scan_chunks WHERE session_id=?",(session_id,))
             db.execute("DELETE FROM ih_scan_previews WHERE session_id=?",(session_id,))
@@ -1324,6 +1327,7 @@ def analyze(request_id, queue_claim=None):
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='unavailable',analysis=? WHERE id=?", (json.dumps(analysis), request_id))
             credits.settle_check(db,request_id)
+            verification_notifications.refresh_state(db,request_id,final_failure=True)
         return
     try:
         listing = json.loads(row["listing"])
@@ -1441,6 +1445,7 @@ def analyze(request_id, queue_claim=None):
             eligibility = photo_eligibility(db,completed)
             if automatic_publication_allowed(listing,eligibility):
                 db.execute("INSERT OR IGNORE INTO ih_publication_jobs VALUES (?,'pending',0,?)", (request_id,time.time()))
+            verification_notifications.refresh_state(db,request_id,assessment_complete=True)
     except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
         if queue_claim:
             if preparation is not None:
@@ -1461,6 +1466,7 @@ def analyze(request_id, queue_claim=None):
         with database() as db:
             db.execute("UPDATE ih_requests SET status='inconclusive',analysis_status='failed',analysis=? WHERE id=?", (json.dumps(analysis),request_id))
             credits.settle_check(db,request_id)
+            verification_notifications.refresh_state(db,request_id,final_failure=True)
     except Exception:
         if preparation is not None:
             preparation.close()
@@ -1815,6 +1821,7 @@ def publish_confirmed_photos(db, row, preparation=None, *, require_auto=False, q
         "prepared_during_comparison":bool(preparation is not None and preparation.matches(snapshot))}
     db.execute("UPDATE ih_requests SET analysis=? WHERE id=?",(json.dumps(analysis),row["id"]))
     event(db,row["id"],f"{eligibility['verified_count']} of {eligibility['total_count']} matched photos published with verification markings")
+    verification_notifications.refresh_state(db,row["id"])
     return publication_id
 
 
@@ -1847,6 +1854,7 @@ def auto_publish_confirmed(request_id, preparation=None, queue_claim=None):
                 row = db.execute("SELECT * FROM ih_requests WHERE id=?",(request_id,)).fetchone()
                 publish_confirmed_photos(db,row,preparation if attempt_index == 0 else None,require_auto=True,queue_claim=queue_claim)
                 db.execute("UPDATE ih_publication_jobs SET state='ready',updated=? WHERE request_id=?",(time.time(),request_id))
+                verification_notifications.refresh_state(db,request_id)
             return
         except Exception:
             # An incomplete render rolls back atomically with its mappings.
@@ -1856,6 +1864,7 @@ def auto_publish_confirmed(request_id, preparation=None, queue_claim=None):
                 if queue_claim:
                     verification_queue.ensure_current(db,queue_claim)
                 db.execute("UPDATE ih_publication_jobs SET state=?,updated=? WHERE request_id=? AND attempts=?",("pending" if attempts < 2 else "failed",time.time(),request_id,attempts))
+                verification_notifications.refresh_state(db,request_id)
 
 
 def schedule_publication(db, row, background):
@@ -2116,6 +2125,7 @@ def create_router(authenticate):
                 "continuous_scan":True,"min_capture_seconds":SCAN_MIN_SECONDS,"max_capture_seconds":SCAN_MAX_SECONDS,
                 "max_chunk_bytes":SCAN_MAX_CHUNK,"max_chunks":SCAN_MAX_CHUNKS,"fixed_video_seconds":10,"credits_required":credits.enabled(),
                 "buyer_requests":True,"shared_evidence":True,"grounded_evidence_regions":True,"listing_photo_import":True,
+                "account_verifications":True,"result_email_notifications":verification_notifications.configured(),
                 "seller_email_drafts":True,"seller_email_sending":seller_email.configured(),
                 "craigslist_reply_reveal":os.getenv("LOCKX_CRAIGSLIST_CONTACT_MODE", "local").strip().lower() == "remote"}
 

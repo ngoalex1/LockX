@@ -222,6 +222,8 @@ def _terminal(db, job, reason):
         credits.settle_check(db, row["id"])
     db.execute("UPDATE verification_jobs SET state='failed',updated_at=?,lease_owner=NULL,lease_until=NULL,reason=? WHERE id=?",
                (time.time(), reason, job["id"]))
+    import verification_notifications
+    verification_notifications.refresh_state(db,job["request_id"],final_failure=True)
 
 
 def desired_workers(backlog):
@@ -318,6 +320,8 @@ def finish_job(claim, error=None):
         if error is None and row["analysis_status"] == "complete":
             db.execute("UPDATE verification_jobs SET state='completed',updated_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?", (now, job["id"]))
             db.execute("UPDATE verification_control SET adaptive_limit=MIN(8,adaptive_limit+1) WHERE id=1")
+            import verification_notifications
+            verification_notifications.refresh_state(db,job["request_id"])
             return True
         retry = retry_classification(error)
         if retry and (isinstance(error, AdmissionWait) or job["attempts"] < integer("LOCKX_VERIFICATION_MAX_ATTEMPTS", 5, 1, 10)):

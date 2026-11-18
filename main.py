@@ -15,6 +15,8 @@ from connectors import SearchProfile, configured_connectors, source_catalog
 from worker import scan_case
 from lost_found import create_router
 from in_hand import create_router as in_hand_router
+from in_hand import database as in_hand_database
+import verification_notifications
 from credit_refunds import worker_loop as refund_worker_loop
 from verification_supervisor import VerificationSupervisor
 
@@ -24,6 +26,7 @@ async def lifespan(app):
     await verification.start()
     task = asyncio.create_task(worker_loop()) if os.getenv("LOCKX_RECOVERY_WORKER") == "1" else None
     refund_task = asyncio.create_task(refund_worker_loop())
+    notification_task = asyncio.create_task(verification_notifications.worker_loop(in_hand_database))
     try:
         yield
     finally:
@@ -36,6 +39,9 @@ async def lifespan(app):
             refund_task.cancel()
             with suppress(asyncio.CancelledError):
                 await refund_task
+        notification_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await notification_task
 
 app = FastAPI(lifespan=lifespan)
 log = logging.getLogger("lockx.supabase")
@@ -124,6 +130,13 @@ def authenticated_identity(authorization: str | None = Header(default=None, alia
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "Authentication is temporarily unavailable") from exc
     if not user.get("id"): raise HTTPException(401, "Your session has expired; please sign in again")
+    # Only the profile returned by Supabase can bind a notification recipient.
+    # Email delivery bookkeeping must not make sign-in depend on the mail service.
+    try:
+        with in_hand_database() as db:
+            verification_notifications.bind_identity(db,user)
+    except Exception as exc:
+        log.warning("Notification identity sync unavailable (%s)",type(exc).__name__)
     return user
 
 def current_user(authorization: str | None = Header(default=None, alias="Authorization")):
@@ -596,6 +609,9 @@ app.include_router(create_router(current_user))
 app.include_router(recovery_router(current_user))
 
 app.include_router(in_hand_router(current_user))
+
+from account_verifications import create_router as account_verifications_router
+app.include_router(account_verifications_router(current_user))
 
 from craigslist_remote import router as craigslist_contact_router
 app.include_router(craigslist_contact_router)

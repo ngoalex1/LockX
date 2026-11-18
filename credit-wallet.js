@@ -167,6 +167,7 @@
     el.innerHTML=`<p class="lx-eyebrow">Your LockX credits</p><h2 id="cwWalletTitle">${signed?'A little proof, on hand.':'Your email. Your credits.'}</h2>
       ${signed?`<div class="cw-balance"><strong>${balance===null?'…':balance}</strong><span>available credits</span></div><div class="cw-account"><span>${esc(data.session.user.email)}</span><button type="button" class="cw-text-button" id="cwSignOut">Sign out</button></div><button type="button" class="cw-text-button" id="cwOpenAdmin" hidden>Admin dashboard →</button>`:
       `<p class="cw-intro">Get a sign-in link to buy credits and use them on any device. No password needed.</p><form id="cwEmailForm"><label for="cwEmail">Email address</label><div class="cw-email-row"><input id="cwEmail" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required maxlength="254"><button class="cw-button" type="submit">Send sign-in link</button></div></form>`}
+      <a class="cw-account-verifications" href="#in-hand/account" id="cwVerifications">Your verifications <span data-verification-unread hidden></span></a>
       <div id="cwMessage" class="cw-message" role="status" hidden></div>
       <div class="cw-pack-picker" role="group" aria-label="Choose your credit pack">${config.packs.map(p=>`<button type="button" data-pick-pack="${p.id}" aria-pressed="${p.id===selected}"><strong>${p.credits} credits</strong><span>${price(p.amount_cents)}</span></button>`).join('')}</div>
       <p class="cw-selected-summary" id="cwSelectedSummary"></p>
@@ -177,6 +178,8 @@
       <p class="cw-terms">One-time purchase. Credits never expire. One credit covers one item check, whether the result matches, mismatches, or needs more evidence. Technical failures restore your credit.</p>
       ${signed?'<details class="cw-history"><summary>Credit history</summary><div id="cwHistory">Loading…</div></details>':''}`;
     updatePackSummary();
+    $('#cwVerifications')?.addEventListener('click',()=>dialog().close());
+    window.LockXAccount?.decorate();
     $('#cwEmailForm')?.addEventListener('submit',async event=>{
       event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;
       try{
