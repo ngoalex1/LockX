@@ -55,43 +55,34 @@
   }
 
   const markup = `
-    <section id="landing" class="page landing-page lx-home lx-chapters-home" aria-labelledby="lxHeroTitle">
-      <section class="lx-chapters-hero lx-wrap" aria-labelledby="lxHeroTitle">
-        <div class="lx-chapters-intro">
-          <p class="lx-eyebrow">LockX in-hand verification</p>
-          <p class="lx-chapters-roi">The best ROI in sales.</p>
-          <h1 id="lxHeroTitle"><span class="lx-chapters-stat">45%</span><span class="lx-chapters-headline">more buying<br>confidence.<em>For just 50¢.</em></span></h1>
+    <section id="landing" class="page landing-page lx-home lx-proof-home" aria-labelledby="lxHeroTitle">
+      <section class="lx-proof-hero lx-wrap" aria-labelledby="lxHeroTitle">
+        <div class="lx-proof-intro"><p>A little proof goes a long way.</p><h1 id="lxHeroTitle">Real item.<br>Visible proof.</h1></div>
+        <div class="lx-proof-art">
+          <p class="lx-proof-art-label">Your item,<br>backed by video.</p>
+          <figure class="lx-proof-example" aria-label="Illustrative example of a LockX verified Pokémon card photo">
+            <figcaption>Illustrative example</figcaption>
+            <div class="lx-proof-photo">${pokemonCard('front','proof-first-hero').replace('viewBox="0 0 260 200"','viewBox="74 17 112 163"')}</div>
+            <div class="lx-proof-mark"><div><strong>lockx</strong><span>${check} In-hand Verified</span></div>${qr()}</div>
+          </figure>
+          <p class="lx-proof-price"><strong>50¢</strong><span>per check</span></p>
+        </div>
+        <p class="lx-proof-confidence"><strong>45%</strong><span>more buying confidence.</span></p>
+        <div class="lx-proof-actions" aria-label="Choose buyer or seller verification"><a class="lx-proof-primary" href="#in-hand/buy">I’m buying</a><a class="lx-proof-secondary" href="#in-hand">I’m selling</a></div>
+        <div class="lx-proof-how" id="lxHowItWorks">
+          <ol aria-label="Photos, a ten-second video, and QR proof">
+            <li><span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m8 6 1.5-2h5L16 6h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="13" r="4" stroke="currentColor" stroke-width="1.6"/></svg></span><p>Photos</p></li>
+            <li><span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="m16 10 5-3v10l-5-3" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></span><p>10s video</p></li>
+            <li><span>${qr()}</span><p>QR proof</p></li>
+          </ol>
+          <p class="lx-proof-note">No app. Just photos and a 10-second video.</p>
         </div>
       </section>
-      <div id="lxHowItWorks" class="lx-chapters" aria-label="Choose buyer or seller verification">
-        <section class="lx-chapter lx-chapter-buyer" aria-labelledby="lxBuyerTitle">
-          <div class="lx-chapter-inner lx-wrap">
-            <div class="lx-chapter-heading"><p class="lx-eyebrow">For buyers</p><h2 id="lxBuyerTitle">You ask.<br>The seller shows.</h2><p class="lx-chapter-cost">Buyer pays 1 credit · 50¢</p></div>
-            <ol class="lx-chapter-steps">
-              <li><span aria-hidden="true">01</span><p>Paste a public listing link. Review up to 4 imported photos.</p></li>
-              <li><span aria-hidden="true">02</span><p>Share your request. The seller records 10 seconds, free.</p></li>
-              <li><span aria-hidden="true">03</span><p>Get visual match proof to compare for yourself.</p></li>
-            </ol>
-            <form id="lxBuyerRequestForm" class="lx-chapter-listing-form"><label for="lxBuyerListing">Public listing link</label><div class="lx-chapter-listing-fields"><input id="lxBuyerListing" type="url" name="listing" inputmode="url" autocomplete="url" placeholder="Paste a public selling link…" required maxlength="2000"><button class="lx-button" type="submit">Ask seller for proof ${arrow}</button></div><small>Public photo imports depend on marketplace access. You share the request with the seller.</small></form>
-          </div>
-        </section>
-        <section class="lx-chapter lx-chapter-seller" aria-labelledby="lxSellerTitle">
-          <div class="lx-chapter-inner lx-wrap">
-            <div class="lx-chapter-heading"><p class="lx-eyebrow">For sellers</p><h2 id="lxSellerTitle">Your item.<br>Visible proof.</h2><p class="lx-chapter-cost">Seller pays 1 credit · 50¢</p></div>
-            <ol class="lx-chapter-steps">
-              <li><span aria-hidden="true">01</span><p>Add up to 4 photos of the item you’re selling.</p></li>
-              <li><span aria-hidden="true">02</span><p>Show the same item in a fresh 10-second video.</p></li>
-              <li><span aria-hidden="true">03</span><p>Get verified photos with a QR code buyers can check.</p></li>
-            </ol>
-            <a class="lx-button lx-chapter-action lx-chapter-action-outline" href="#in-hand">I’m selling ${arrow}</a>
-          </div>
-        </section>
-      </div>
-      <section class="lx-chapters-note lx-wrap" aria-label="Verification cost and evidence sharing"><p><strong>Same 50¢ check. Different starting points.</strong> A seller responding to a buyer’s paid request records free.</p><p>No app. No password. Video and supporting frames are shared with the seller’s consent.</p><small>Verification records a visual match at the capture time. It does not certify authenticity, ownership, or delivery.</small></section>
+      <details class="lx-proof-more lx-wrap"><summary>Credits &amp; questions <span aria-hidden="true">+</span></summary>
       <section class="lx-faq lx-section lx-wrap" id="lxQuestions" aria-labelledby="lxFAQTitle"><div class="lx-section-heading"><h2 id="lxFAQTitle">A few good questions.</h2></div><div class="lx-faq-list"><details><summary>What does In-hand Verified confirm?<span aria-hidden="true">+</span></summary><p>It checks whether your selected photos match the physical item shown in a newly recorded video. It does not establish brand authenticity, legal ownership, condition beyond what is visible, or a guarantee of a transaction.</p></details><details><summary>Do I need an app or a password?<span aria-hidden="true">+</span></summary><p>No app or password is needed. Buyers and sellers who start a check sign in with an email link to use their credits. A seller responding to a buyer’s paid request records free, without an account.</p></details><details><summary>How long does it take?<span aria-hidden="true">+</span></summary><p>The recording lasts 10 seconds and stops automatically. Upload and AI comparison follow; the total time depends on your connection, photos, and the evidence captured.</p></details><details><summary>How do I save the verified photos?<span aria-hidden="true">+</span></summary><p>Your approved images appear with QR codes even if another selected photo does not match. Only verified photos are included when saving. Tap the save button, then choose Save Images on iPhone or a supported save option on Android. Your phone asks you to confirm. Individual image saving is also available.</p></details></div></section>
 
-      <section class="lx-final-cta lx-wrap"><div class="lx-cta-emblem">${check}</div><h2>A little proof.<br>A lot more confidence.</h2><p>Start with the photos you already have.</p><a href="#in-hand" class="lx-button">Verify your photos ${arrow}</a></section>
-      <footer class="lx-footer"><div class="lx-wrap"><a class="lx-wordmark" href="#landing" aria-label="LockX home">lock<span>x</span><small class="lx-brand-credit">OpenAI technology</small></a><span>In-hand verification. Made for your listing photos.</span><small>© ${new Date().getFullYear()} LockX</small></div></footer>
+      </details>
+      <footer class="lx-proof-footer lx-wrap"><span>LockX · In-hand verification</span><small>© ${new Date().getFullYear()} LockX</small></footer>
     </section>`;
 
   function scrollToSection(id) {
@@ -99,7 +90,7 @@
       if (typeof window.go === 'function') window.go('landing');
       if (location.hash !== '#landing') location.hash = '#landing';
     }
-    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }));
+    requestAnimationFrame(() => {const target=document.getElementById(id);for(let parent=target?.parentElement;parent;parent=parent.parentElement){if(parent.tagName==='DETAILS')parent.open=true;}target?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });});
   }
 
   function install() {

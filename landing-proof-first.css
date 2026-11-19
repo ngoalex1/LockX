@@ -1,0 +1,78 @@
+/* Approved Proof first composition, in the selected Rose & walnut palette. */
+body.lockx-public .lx-home.lx-proof-home{--proof-page:#f8f0eb;--proof-surface:#fffcf7;--proof-ink:#342726;--proof-accent:#783f4b;--proof-soft:#e8d6d0;--proof-muted:#705b5e;--proof-line:#d9c4be;--proof-green:#286b50;--proof-green-soft:#e1eee5;background:var(--proof-page);color:var(--proof-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+body.lockx-public .lx-proof-home .lx-proof-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"intro art" "confidence art" "actions art" "how how";gap:20px 70px;align-items:center;max-width:1000px;padding:46px 0 28px}
+body.lockx-public .lx-proof-home .lx-proof-intro{grid-area:intro}
+body.lockx-public .lx-proof-home .lx-proof-intro>p{margin:0;color:var(--proof-muted);font-size:14px;line-height:1.5;font-weight:500}
+body.lockx-public .lx-proof-home #lxHeroTitle{display:block;margin:12px 0 0;color:var(--proof-ink);font:650 clamp(48px,5.4vw,70px)/1.02 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;letter-spacing:-3px}
+body.lockx-public .lx-proof-home .lx-proof-art{grid-area:art;position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:390px;background:radial-gradient(ellipse,var(--proof-soft),transparent 69%)}
+body.lockx-public .lx-proof-home .lx-proof-art-label{position:absolute;z-index:1;left:0;top:0;margin:0;color:var(--proof-muted);font-size:13px;line-height:1.5}
+body.lockx-public .lx-proof-home .lx-proof-example{position:relative;width:288px;margin:0;padding:15px;border:1px solid var(--proof-line);border-radius:19px;background:var(--proof-surface);box-shadow:0 12px 32px #34202b12;transform:rotate(-5deg)}
+body.lockx-public .lx-proof-home .lx-proof-example figcaption{position:absolute;z-index:1;top:19px;left:20px;color:var(--proof-muted);font-size:10px;line-height:1.4;letter-spacing:.6px;text-transform:uppercase}
+body.lockx-public .lx-proof-home .lx-proof-photo{height:240px;padding:17px 0 5px;overflow:hidden;border-radius:10px;background:var(--proof-soft)}
+body.lockx-public .lx-proof-home .lx-proof-photo>.lx-camera{display:block;width:100%;height:100%;max-width:100%;transform:none}
+body.lockx-public .lx-proof-home .lx-proof-mark{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 1px 0}
+body.lockx-public .lx-proof-home .lx-proof-mark strong{display:block;color:var(--proof-ink);font-size:28px;line-height:1;font-weight:750;letter-spacing:-1.5px}
+body.lockx-public .lx-proof-home .lx-proof-mark span{display:flex;align-items:center;gap:4px;margin-top:7px;color:var(--proof-green);font-size:12px;line-height:1.4;white-space:nowrap}
+body.lockx-public .lx-proof-home .lx-proof-mark span svg{width:15px;height:15px;flex:none}
+body.lockx-public .lx-proof-home .lx-proof-mark>.lx-example-qr{flex:none;width:48px;height:48px;padding:4px;background:#fff;color:var(--proof-ink)}
+body.lockx-public .lx-proof-home .lx-proof-price{position:absolute;right:0;bottom:23px;display:flex;flex-direction:column;align-items:center;justify-content:center;width:94px;height:94px;margin:0;border-radius:50%;background:var(--proof-green-soft);color:var(--proof-green);transform:rotate(9deg)}
+body.lockx-public .lx-proof-home .lx-proof-price strong{font-size:32px;font-weight:650;line-height:1;letter-spacing:-1px}
+body.lockx-public .lx-proof-home .lx-proof-price span{margin-top:5px;font-size:12px;line-height:1.3}
+body.lockx-public .lx-proof-home .lx-proof-confidence{grid-area:confidence;display:flex;align-items:center;justify-content:flex-start;gap:13px;margin:0}
+body.lockx-public .lx-proof-home .lx-proof-confidence strong{flex:none;color:var(--proof-accent);font-size:58px;font-weight:650;line-height:1;letter-spacing:-3px}
+body.lockx-public .lx-proof-home .lx-proof-confidence>span{color:var(--proof-ink);font-size:16px;line-height:1.5}
+body.lockx-public .lx-proof-home .lx-proof-actions{grid-area:actions;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+body.lockx-public .lx-proof-home .lx-proof-actions>a{display:flex;align-items:center;justify-content:center;min-width:0;min-height:52px;border:1px solid var(--proof-accent);border-radius:16px;padding:13px 16px;background:var(--proof-accent);color:var(--proof-surface);text-decoration:none;font-size:16px;font-weight:600;line-height:1.4;text-align:center}
+body.lockx-public .lx-proof-home .lx-proof-actions>.lx-proof-secondary{background:transparent;color:var(--proof-accent)}
+body.lockx-public .lx-proof-home .lx-proof-primary:hover{background:#64333e}
+body.lockx-public .lx-proof-home .lx-proof-secondary:hover{background:var(--proof-soft)}
+body.lockx-public .lx-proof-home .lx-proof-how{grid-area:how;max-width:560px;width:100%;justify-self:center;margin-top:14px;scroll-margin-top:130px}
+body.lockx-public .lx-proof-home .lx-proof-how ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0;padding:0;list-style:none}
+body.lockx-public .lx-proof-home .lx-proof-how li{min-width:0;text-align:center}
+body.lockx-public .lx-proof-home .lx-proof-how li>span{display:grid;place-items:center;min-height:60px;border-radius:14px;background:var(--proof-soft);color:var(--proof-accent)}
+body.lockx-public .lx-proof-home .lx-proof-how li>span>svg{display:block;width:27px;height:27px;margin:0;padding:0;color:inherit;background:transparent}
+body.lockx-public .lx-proof-home .lx-proof-how li>p{margin:8px 0 0;color:var(--proof-muted);font-size:14px;line-height:1.5}
+body.lockx-public .lx-proof-home .lx-proof-note{margin:14px 0 0;color:var(--proof-muted);text-align:center;font-size:13px;line-height:1.5}
+body.lockx-public .lx-proof-home .lx-proof-more{max-width:1000px;margin-top:0;border-top:1px solid var(--proof-line);border-bottom:1px solid var(--proof-line)}
+body.lockx-public .lx-proof-home .lx-proof-more>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:16px 0;color:var(--proof-accent);font-size:14px;font-weight:500;line-height:1.4;list-style:none;cursor:pointer}
+body.lockx-public .lx-proof-home .lx-proof-more>summary::-webkit-details-marker{display:none}
+body.lockx-public .lx-proof-home .lx-proof-more>summary>span{font-size:24px;font-weight:400;line-height:1}
+body.lockx-public .lx-proof-home .lx-proof-more[open]>summary>span{transform:rotate(45deg)}
+body.lockx-public .lx-proof-home .lx-proof-more #lockxPricing,body.lockx-public .lx-proof-home .lx-proof-more #lxQuestions{width:100%;max-width:none;padding-top:28px;padding-bottom:36px}
+body.lockx-public .lx-proof-home .lx-proof-more #lockxPricing::before,body.lockx-public .lx-proof-home .lx-proof-more #lxQuestions::before{display:none}
+body.lockx-public .lx-proof-home .lx-proof-more .cw-pricing-heading h2,body.lockx-public .lx-proof-home .lx-proof-more .lx-section-heading h2{font-size:32px;font-weight:600;line-height:1.1;letter-spacing:-1px}
+body.lockx-public .lx-proof-home .lx-proof-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:1000px;padding:21px 0 26px;color:var(--proof-muted);font-size:12px;line-height:1.5}
+body.lockx-public .lx-proof-home .lx-proof-footer small{font-size:inherit;white-space:nowrap}
+body.lockx-public .lx-proof-home :is(a,summary):focus-visible{outline:3px solid var(--proof-accent);outline-offset:4px}
+@media(max-width:760px){
+ body.lockx-public .lx-proof-home .lx-proof-hero{display:block;width:calc(100% - 40px);max-width:430px;padding:24px 0 22px}
+ body.lockx-public .lx-proof-home .lx-proof-intro>p{font-size:13px}
+ body.lockx-public .lx-proof-home #lxHeroTitle{margin-top:10px;font-size:46px;line-height:1.02;letter-spacing:-2px}
+ body.lockx-public .lx-proof-home .lx-proof-art{min-height:286px;margin-top:20px}
+ body.lockx-public .lx-proof-home .lx-proof-art-label{font-size:12px}
+ body.lockx-public .lx-proof-home .lx-proof-example{width:230px;padding:12px;border-radius:16px}
+ body.lockx-public .lx-proof-home .lx-proof-example figcaption{top:17px;left:17px;font-size:9px;letter-spacing:.5px}
+ body.lockx-public .lx-proof-home .lx-proof-photo{height:178px;padding-top:15px}
+ body.lockx-public .lx-proof-home .lx-proof-mark strong{font-size:24px}
+ body.lockx-public .lx-proof-home .lx-proof-mark span{margin-top:5px;font-size:11px}
+ body.lockx-public .lx-proof-home .lx-proof-mark span svg{width:14px;height:14px}
+ body.lockx-public .lx-proof-home .lx-proof-mark>.lx-example-qr{width:40px;height:40px;padding:3px}
+ body.lockx-public .lx-proof-home .lx-proof-price{right:0;bottom:20px;width:81px;height:81px}
+ body.lockx-public .lx-proof-home .lx-proof-price strong{font-size:29px}
+ body.lockx-public .lx-proof-home .lx-proof-price span{font-size:11px}
+ body.lockx-public .lx-proof-home .lx-proof-confidence{justify-content:center;margin:9px 0 20px;gap:12px}
+ body.lockx-public .lx-proof-home .lx-proof-confidence strong{font-size:48px;letter-spacing:-2.5px}
+ body.lockx-public .lx-proof-home .lx-proof-confidence>span{font-size:14px}
+ body.lockx-public .lx-proof-home .lx-proof-actions{gap:10px}
+ body.lockx-public .lx-proof-home .lx-proof-actions>a{min-height:50px;padding:12px;font-size:15px}
+ body.lockx-public .lx-proof-home .lx-proof-how{margin-top:20px}
+ body.lockx-public .lx-proof-home .lx-proof-how ol{gap:10px}
+ body.lockx-public .lx-proof-home .lx-proof-how li>span{min-height:54px;border-radius:12px}
+ body.lockx-public .lx-proof-home .lx-proof-how li>span>svg{width:25px;height:25px}
+ body.lockx-public .lx-proof-home .lx-proof-how li>p{margin-top:7px;font-size:13px}
+ body.lockx-public .lx-proof-home .lx-proof-note{margin-top:12px;font-size:12px}
+ body.lockx-public .lx-proof-home .lx-proof-more,body.lockx-public .lx-proof-home .lx-proof-footer{width:calc(100% - 40px);max-width:430px}
+ body.lockx-public .lx-proof-home .lx-proof-more .cw-pack{display:block}
+ body.lockx-public .lx-proof-home .lx-proof-more .cw-pack-price{margin:18px 0;text-align:left}
+}
+@media(max-width:350px){body.lockx-public .lx-proof-home #lxHeroTitle{font-size:41px}body.lockx-public .lx-proof-home .lx-proof-hero,body.lockx-public .lx-proof-home .lx-proof-more,body.lockx-public .lx-proof-home .lx-proof-footer{width:calc(100% - 32px)}body.lockx-public .lx-proof-home .lx-proof-example{width:216px}body.lockx-public .lx-proof-home .lx-proof-art{min-height:280px}body.lockx-public .lx-proof-home .lx-proof-confidence{gap:9px}body.lockx-public .lx-proof-home .lx-proof-confidence>span{font-size:13px}body.lockx-public .lx-proof-home .lx-proof-footer{flex-wrap:wrap;gap:8px}}
