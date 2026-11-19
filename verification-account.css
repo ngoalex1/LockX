@@ -6,6 +6,49 @@ body.lockx-public #lockxPublicHeader .va-header-link{justify-content:center;min-
 body.lockx-public #lockxPublicHeader .va-header-link:hover{background:#ddc6c0}
 body.lockx-public #lockxPublicHeader .va-header-link:focus-visible{outline:3px solid #6a927f;outline-offset:3px}
 body.lockx-public #lockxPublicHeader #cwHeaderButton{margin-left:0;margin-right:0}
+/* Compact account list: outcome and one action first, optional detail below. */
+.va-compact-account .va-heading{margin-bottom:18px;display:block}
+body.lockx-public .va-compact-account .va-heading h1{margin:0;font:650 28px/1.15 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-1px}
+.va-compact-account .va-tabs{margin:0 0 16px;padding-bottom:16px;gap:6px}
+.va-compact-account .va-tabs a{flex:1;min-height:44px;font-size:14px;font-weight:500}
+.va-compact-account .va-records{gap:11px}
+.va-compact-account .va-compact-record{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;padding:14px;border-radius:16px}
+.va-compact-account .va-record-main{grid-column:1;grid-row:1;grid-template-columns:56px minmax(0,1fr);align-items:center;gap:12px;min-height:66px}
+.va-compact-account .va-thumb{width:56px;height:66px;border-radius:9px}
+.va-compact-account .va-record-meta{font-size:11px;line-height:1.4;gap:8px}
+.va-compact-account .va-badge{padding:2px 7px;font-size:10px;line-height:1.4}
+body.lockx-public .va-compact-account .va-record h2{margin:3px 0;font:650 17px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.2px}
+body.lockx-public .va-compact-account .va-panel h2{font:600 24px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.5px}
+body.lockx-public .va-compact-account .va-attempts h3{margin:8px 0;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.va-compact-account .va-status{font-size:13px;font-weight:500;line-height:1.45}
+.va-compact-account .va-status:is([data-outcome=partial],[data-outcome=inconclusive],[data-outcome=mismatch],[data-outcome=failed],[data-outcome=proof_preparation_failed]){color:#835c28!important}
+.va-compact-account .va-record-actions{grid-column:1;grid-row:2;position:relative;z-index:1;align-self:start;justify-self:start;margin:10px 0 0;gap:0}
+.va-compact-account .va-record-actions>.va-button{min-width:140px;min-height:44px;padding:10px 15px;border-radius:22px;font-size:13px;font-weight:600}
+.va-compact-account .va-details{grid-column:1;grid-row:2;min-width:0;margin-top:10px}
+.va-compact-account .va-details>summary{display:flex;align-items:center;justify-content:flex-end;gap:5px;width:max-content;min-width:78px;min-height:44px;margin-left:auto;padding:8px 0 8px 8px;list-style:none;color:var(--lx-muted,#705b5e);font-size:12px;cursor:pointer}
+.va-compact-account .va-details>summary::-webkit-details-marker{display:none}
+.va-compact-account .va-details>summary::after{content:"⌄";font-size:17px;line-height:1}
+.va-compact-account .va-details[open]>summary::after{transform:rotate(180deg)}
+.va-compact-account .va-details-body{margin-top:12px;padding-top:10px;border-top:1px solid var(--lx-line,#dbc5bf);color:var(--lx-muted,#705b5e);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.va-compact-account .va-details-body .va-date,.va-compact-account .va-details-body .va-counts{font-size:12px;margin:4px 0!important}
+.va-compact-account .va-details-body>.va-text{min-height:40px;font-size:12px}
+.va-compact-account .va-details-body .va-attempts{margin-top:8px;padding-top:4px}
+.va-compact-account .va-details-body .va-attempts>summary{font-size:12px}
+body.lockx-public .va-compact-account .va-attempts h3{margin:10px 0 4px;font:600 13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.va-compact-account .va-scope{display:block;margin:3px 0 0;color:var(--lx-muted,#705b5e);font-size:11px;line-height:1.5}
+.va-compact-account .va-account-details{margin-top:16px;border-top:1px solid var(--lx-line,#dbc5bf);font-size:12px;color:var(--lx-muted,#705b5e)}
+.va-compact-account .va-account-details>summary{display:list-item;min-height:44px;padding:13px 0;cursor:pointer}
+.va-compact-account .va-account-details .va-account-bar{gap:8px 14px}
+.va-compact-account .va-account-details .va-note{font-size:12px;margin:8px 0 12px!important}
+@media(min-width:800px){
+ .va-compact-account .va-compact-record{grid-template-columns:minmax(0,1fr) auto 78px;grid-template-rows:auto;column-gap:18px}
+ .va-compact-account .va-record-main{position:relative;z-index:1;grid-column:1;grid-row:1;align-self:start;min-height:80px}
+ .va-compact-account .va-record h2{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+ .va-compact-account .va-record-actions{grid-column:2;grid-row:1;align-self:start;margin-top:18px}
+ .va-compact-account .va-details{grid-column:1/-1;grid-row:1;margin:0}
+ .va-compact-account .va-details>summary{min-height:80px}
+}
+@media(max-width:350px){body.lockx-public .va-compact-account .va-heading h1{font-size:26px}.va-compact-account .va-compact-record{padding:12px}.va-compact-account .va-record-main{gap:9px}body.lockx-public .va-compact-account .va-record h2{font-size:16px}.va-compact-account .va-status{font-size:12px}}
 @media(max-width:760px){
   body.lockx-public #lockxPublicHeader{height:auto}
   body.lockx-public #lockxPublicHeader nav{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand verify" "account credits";width:calc(100% - 28px);gap:9px 12px;padding:9px 0}

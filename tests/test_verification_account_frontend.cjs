@@ -23,7 +23,7 @@ function harness(options={}){
   context.history={replaceState(_a,_b,value){const url=new URL(value,context.location.origin);context.location.hash=url.hash;context.location.search=url.search;context.location.pathname=url.pathname;}};
   // A real URL constructor is needed for redirect and listing validation.
   context.URL=class AccountURL extends URL{};context.URL.createObjectURL=()=> 'blob:actual-photo';context.URL.revokeObjectURL=url=>revoked.push(url);
-  vm.createContext(context);vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testAccount={card,counts,reportLink,listingLink,identity,returnRoute};})();'),context);
+  vm.createContext(context);vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testAccount={card,counts,status,action,reportLink,listingLink,identity,returnRoute};})();'),context);
   return {api:win.LockXAccount,helpers:win.testAccount,context,container,controls,requests,timers,revoked,sent,get boots(){return boots;},switchOwner(next){currentSession=next;for(const fn of authListeners)fn('SIGNED_IN',next);},hidden(value){doc.hidden=value;documentEvents.get('visibilitychange')?.();},navigate(hash){context.location.hash=hash;win.dispatchEvent({type:'hashchange'});}};
 }
 test('dashboard is Bearer-only, shows buyer and seller tabs, and links exact latest attempt behind account sign-in',async()=>{
@@ -109,4 +109,31 @@ test('return-route whitelist rejects external URLs, management capabilities, adm
   const invalid=['https://evil.example/','#admin','#in-hand/report/'+attemptId+'/SECRET_KEY','#in-hand/report/'+attemptId+'?account=0','#in-hand/report/'+attemptId+'?account=1&extra=yes','#in-hand/account?admin=1','javascript:alert(1)','#in-hand/report/not-a-uuid?account=1'];
   for(const value of invalid){const h=harness({hash:'#landing',search:'?verification_return='+encodeURIComponent(value)});await flush();assert.equal(h.helpers.returnRoute(value),'');assert.equal(h.context.location.hash,'#landing');assert.equal(h.context.location.search,'');assert.equal(h.boots,0);assert.equal(h.requests.length,0);}
   const h=harness();assert.equal(h.helpers.returnRoute('#in-hand/account?kind=seller'),'#in-hand/account?kind=seller');
+});
+
+test('compact dashboard puts only its heading and tabs above the list, with account metadata disclosed below',async()=>{
+  const h=harness();h.api.mount(h.container);await flush();await flush();const html=h.container.innerHTML,above=html.split('<div class="va-records">')[0];
+  assert.match(above,/class="va-account va-compact-account"/);assert.match(above,/<header class="va-heading"><h1 id="vaTitle">Your verifications<\/h1><\/header>/);assert.match(above,/class="va-tabs"/);
+  assert.doesNotMatch(above,/va-eyebrow|Keep track|one@example|new result|va-account-bar|Refresh|Verify photos/);
+  assert.match(html,/<details class="va-account-details"><summary>Account details<\/summary><div class="va-details-body">/);assert.ok(html.indexOf('one@example.test')>html.indexOf('va-account-details'));assert.ok(html.indexOf('id="vaRefresh"')>html.indexOf('va-account-details'));
+});
+
+test('compact item has one main action and hides dates, listing and independent attempt history in Details',()=>{
+  const h=harness(),html=h.helpers.card(item()),main=html.split('<details class="va-details">')[0],details=html.slice(html.indexOf('<details class="va-details">'));
+  assert.match(html,/<article class="va-record va-compact-record">/);assert.match(main,/Actual listing item/);assert.match(main,/>Buying<\/span>/);assert.match(main,/aria-label="1 new result">New<\/span>/);assert.ok(main.indexOf('va-record-meta')<main.indexOf('<h2>'));assert.match(main,/1\/1 verified · latest recording/);
+  assert.equal((main.match(/class="va-button"/g)||[]).length,1);assert.doesNotMatch(main,/va-date|va-counts|View listing|Recording attempts|original photos|Each recording/);
+  assert.match(details,/<summary>Details<\/summary><div class="va-details-body">/);assert.match(details,/va-date/);assert.match(details,/View listing/);assert.match(details,/1 of 1 photos verified in this recording · 4 original photos/);assert.match(details,/Photos are not combined into one recording/);assert.match(details,/#in-hand\/report\/attempt-two\?account=1/);
+});
+
+test('every outcome has a contextual navigation action without promising retry, publication or a new recording',()=>{
+  const h=harness();for(const [outcome,kind,label] of [['verified','seller','View proof'],['partial','buyer','Review result'],['pending','buyer','View request'],['pending','seller','Continue'],['processing','buyer','View progress'],['preparing_proof','seller','View progress'],['ready_to_publish','seller','Review & publish'],['failed','buyer','Open check'],['proof_preparation_failed','seller','Open check'],['withdrawn','seller','View result'],['inconclusive','seller','Review result'],['mismatch','buyer','Review result'],['cancelled','buyer','View request'],['declined','buyer','View request'],['expired','buyer','View request']]){
+    const row=item({outcome,kind}),html=h.helpers.card(row);assert.equal(h.helpers.action(row),label);assert.match(html,new RegExp('class="va-button" href="#in-hand/report/attempt-two\\?account=1">'+label.replace('&','&amp;')+'<\\/a>'));assert.equal((html.match(/class="va-button"/g)||[]).length,1);assert.doesNotMatch(html,/>(?:Retry|Publish|Record again|New check)<\/a>/);
+  }
+});
+
+test('compact statuses show only supported completed ratios and preserve independent latest-recording scope',()=>{
+  const h=harness();assert.equal(h.helpers.status(item({outcome:'verified',root_total_count:4,latest_attempt:{id:'root-check',verified_count:4,total_count:4}})),'Verified · 4/4 photos');assert.equal(h.helpers.status(item({outcome:'partial',latest_attempt:{verified_count:2,total_count:4}})),'2/4 photos verified');assert.equal(h.helpers.status(item({outcome:'verified'})),'1/1 verified · latest recording');
+  for(const outcome of ['pending','processing','preparing_proof','ready_to_publish','failed','proof_preparation_failed','withdrawn','cancelled','declined','expired','inconclusive','mismatch'])assert.doesNotMatch(h.helpers.status(item({outcome})),/\d+\/\d+/);
+  assert.equal(h.helpers.status(item({outcome:'partial',latest_attempt:{verified_count:null,total_count:4}})),'Some photos verified');
+  for(const latest_attempt of [{verified_count:null,total_count:4},{verified_count:5,total_count:4},{verified_count:1.5,total_count:4},{verified_count:0,total_count:0}])assert.equal(h.helpers.status(item({outcome:'verified',latest_attempt})),'Verified');
 });

@@ -31,7 +31,7 @@
     }
     throw Error('Your sign-in changed. Please try again.');
   }
-  function badge(count){return Number.isSafeInteger(count)&&count>0?`<span class="va-badge">${count} new ${count===1?'result':'results'}</span>`:'';}
+  function badge(count){return Number.isSafeInteger(count)&&count>0?`<span class="va-badge" aria-label="${count} new ${count===1?'result':'results'}">New</span>`:'';}
   function updateBadges(count){lastUnreadCount=Number.isSafeInteger(count)&&count>=0?count:null;document.querySelectorAll('[data-verification-unread]').forEach(node=>{node.hidden=!Number.isSafeInteger(lastUnreadCount)||lastUnreadCount<1;node.textContent=node.hidden?'':String(lastUnreadCount);});}
   function reportLink(value){return id(value)?'#in-hand/report/'+encodeURIComponent(value)+'?account=1':'#in-hand/account';}
   function returnRoute(value){
@@ -49,15 +49,35 @@
     const label=['preparing_proof','ready_to_publish','proof_preparation_failed','withdrawn'].includes(outcome)?'matched':'verified';
     return `${verified} of ${total} photos ${label} in this recording${rootTotal}`;
   }
+  function status(item){
+    const latest=item.latest_attempt||item,matched=latest.verified_count,total=latest.total_count;
+    const known=Number.isInteger(matched)&&Number.isInteger(total)&&matched>=0&&total>0&&matched<=total;
+    const subset=Number.isInteger(item.root_total_count)&&item.root_total_count>total;
+    if(known&&subset&&['verified','partial'].includes(item.outcome))return `${matched}/${total} verified · latest recording`;
+    if(item.outcome==='verified')return 'Verified'+(known?` · ${matched}/${total} photos`:'');
+    if(item.outcome==='partial')return known?`${matched}/${total} photos verified`:'Some photos verified';
+    if(item.outcome==='pending')return item.kind==='buyer'?'Awaiting seller':'Awaiting recording';
+    return {processing:'Processing',preparing_proof:'Preparing proof',ready_to_publish:'Ready to publish',inconclusive:'More evidence needed',mismatch:'Not all photos matched',failed:'Couldn’t finish',proof_preparation_failed:'Proof needs attention',withdrawn:'Proof withdrawn',cancelled:'Cancelled',declined:'Seller declined',expired:'Expired'}[item.outcome]||'Status unavailable';
+  }
+  function action(item){
+    if(item.outcome==='verified')return 'View proof';
+    if(['partial','inconclusive','mismatch'].includes(item.outcome))return 'Review result';
+    if(item.outcome==='ready_to_publish')return 'Review & publish';
+    if(item.outcome==='pending')return item.kind==='buyer'?'View request':'Continue';
+    if(['processing','preparing_proof'].includes(item.outcome))return 'View progress';
+    if(['failed','proof_preparation_failed'].includes(item.outcome))return 'Open check';
+    if(item.kind==='buyer'&&['cancelled','declined','expired'].includes(item.outcome))return 'View request';
+    return 'View result';
+  }
   function card(item){
     if(!id(item?.id))return '';
-    const latest=item.latest_attempt||item,target=id(latest.id)||item.id,kind=item.kind==='buyer'?'Buying':'Selling',outcome=item.kind==='buyer'&&item.outcome==='pending'?'Awaiting seller':outcomes[item.outcome]||'Status unavailable',listing=listingLink(item.listing_url);
+    const latest=item.latest_attempt||item,target=id(latest.id)||item.id,kind=item.kind==='buyer'?'Buying':'Selling',listing=listingLink(item.listing_url);
     const attempts=Array.isArray(item.attempts)?item.attempts.slice(0,3).filter(attempt=>id(attempt?.id)):[];
     const preview=item.preview_url==='/account/verifications/'+item.id+'/thumbnail'?`data-verification-preview="${esc(item.preview_url)}"`:id(item.preview_media_id)?`data-verification-media="${esc(item.preview_media_id)}"`:'';
-    return `<article class="va-record"><div class="va-record-main"><div class="va-thumb">${preview?`<img ${preview} alt="Listing photo for ${esc(item.title||'your item')}" loading="lazy">`:'<span>No photo</span>'}</div><div class="va-record-copy"><div class="va-record-meta"><span>${kind}</span>${badge(item.unread_count)}</div><h2>${esc(item.title||'Item verification')}</h2><p class="va-status" data-outcome="${esc(item.outcome||'unknown')}">${outcome}</p>${counts(item)?`<p class="va-counts">${esc(counts(item))}</p>`:''}<p class="va-date">${esc(time(item.created))}${latest.id!==item.id?' · Latest recording shown':''}</p></div></div><div class="va-record-actions"><a class="va-button" href="${reportLink(target)}">View result</a>${listing?`<a class="va-text" href="${esc(listing)}" target="_blank" rel="noopener noreferrer">View listing</a>`:''}</div>${attempts.length>1?`<details class="va-attempts"><summary>${attempts.length} recording attempts</summary><p>Each recording has its own evidence and proof. Photos are not combined into one recording.</p><ol>${attempts.map((attempt,index)=>`<li><a href="${reportLink(attempt.id)}">Attempt ${index+1}</a><span>${outcomes[attempt.outcome]||'Status unavailable'}${attempt.id===target?' · Latest':''}</span></li>`).join('')}</ol></details>`:''}</article>`;
+    return `<article class="va-record va-compact-record"><div class="va-record-main"><div class="va-thumb">${preview?`<img ${preview} alt="Listing photo for ${esc(item.title||'your item')}" loading="lazy">`:'<span>No photo</span>'}</div><div class="va-record-copy"><div class="va-record-meta"><span>${kind}</span>${badge(item.unread_count)}</div><h2>${esc(item.title||'Item verification')}</h2><p class="va-status" data-outcome="${esc(item.outcome||'unknown')}">${esc(status(item))}</p></div></div><div class="va-record-actions"><a class="va-button" href="${reportLink(target)}">${esc(action(item))}</a></div><details class="va-details"><summary>Details</summary><div class="va-details-body"><p class="va-date">${esc(time(item.created))}${latest.id!==item.id?' · Latest recording shown':''}</p>${counts(item)?`<p class="va-counts">${esc(counts(item))}</p>`:''}${listing?`<a class="va-text" href="${esc(listing)}" target="_blank" rel="noopener noreferrer">View listing</a>`:''}${attempts.length>1?`<div class="va-attempts"><h3>Recording attempts</h3><p>Each recording has its own evidence and proof. Photos are not combined into one recording.</p><ol>${attempts.map((attempt,index)=>`<li><a href="${reportLink(attempt.id)}">Attempt ${index+1}</a><span>${outcomes[attempt.outcome]||'Status unavailable'}${attempt.id===target?' · Latest':''}</span></li>`).join('')}</ol></div>`:''}</div></details></article>`;
   }
   function shell(state,content){
-    state.container.innerHTML=`<section class="va-account" aria-labelledby="vaTitle"><header class="va-heading"><div><p class="va-eyebrow">Your LockX account</p><h1 id="vaTitle">Your verifications</h1><p>Keep track of the items you’re buying and selling.</p></div><a class="va-text" href="#in-hand">Verify photos</a></header>${content}</section>`;
+    state.container.innerHTML=`<section class="va-account va-compact-account" aria-labelledby="vaTitle"><header class="va-heading"><h1 id="vaTitle">Your verifications</h1></header>${content}</section>`;
   }
   function signIn(state,report=false){
     const content=`<div class="va-panel va-sign-in"><h2>${report?'Sign in to open your result.':'Your results, on any device.'}</h2><p>Use the email that ${report?'owns this verification':'you used for your credits and verifications'}. No password needed.</p><form id="vaSignIn"><label for="vaEmail">Email address</label><input id="vaEmail" type="email" autocomplete="email" inputmode="email" maxlength="254" required><button class="va-button" type="submit">Send sign-in link</button></form><p id="vaSignInStatus" role="status" hidden></p></div>`;
@@ -104,7 +124,7 @@
       state.items=append?[...state.items,...data.items.slice(0,20).filter(item=>!state.items.some(old=>old.id===item.id))]:data.items.slice(0,20);state.cursor=typeof data.next_cursor==='string'&&data.next_cursor.length<=2048?data.next_cursor:null;
       const fingerprint=JSON.stringify([state.items,state.cursor,data.unread_count]);if(fingerprint===state.fingerprint){schedule(state);return;}state.fingerprint=fingerprint;
       state.urls.forEach(url=>URL.revokeObjectURL(url));state.urls.clear();updateBadges(data.unread_count);
-      shell(state,`<div class="va-account-bar"><span>${esc(owner.email)}</span>${badge(data.unread_count)}<button type="button" class="va-text" id="vaRefresh">Refresh</button></div>${tabs(state)}<div class="va-records">${state.items.length?state.items.map(card).join(''):`<div class="va-panel va-empty"><h2>No ${state.kind==='buyer'?'buyer requests':state.kind==='seller'?'seller verifications':'verifications'} yet.</h2><p>New checks created with this email will appear here.</p><div class="va-empty-actions"><a class="va-button" href="#in-hand${state.kind==='buyer'?'/buy':''}">${state.kind==='buyer'?'Request seller verification':'Verify your photos'}</a>${state.kind==='all'?'<a class="va-text" href="#in-hand/buy">Ask a seller for proof</a>':''}</div></div>`}</div>${state.cursor?'<button type="button" class="va-button va-secondary" id="vaMore">Load more</button>':''}<p class="va-note">Results belong to the signed-in email. Earlier checks created without an account stay on their original private links.</p>`);
+      shell(state,`${tabs(state)}<div class="va-records">${state.items.length?state.items.map(card).join(''):`<div class="va-panel va-empty"><h2>No ${state.kind==='buyer'?'buyer requests':state.kind==='seller'?'seller verifications':'verifications'} yet.</h2><p>New checks created with this email will appear here.</p><div class="va-empty-actions"><a class="va-button" href="#in-hand${state.kind==='buyer'?'/buy':''}">${state.kind==='buyer'?'Request seller verification':'Verify your photos'}</a>${state.kind==='all'?'<a class="va-text" href="#in-hand/buy">Ask a seller for proof</a>':''}</div></div>`}</div>${state.cursor?'<button type="button" class="va-button va-secondary" id="vaMore">Load more</button>':''}<details class="va-account-details"><summary>Account details</summary><div class="va-details-body"><p class="va-note">${esc(owner.email)}</p><button type="button" class="va-text" id="vaRefresh">Refresh list</button><p class="va-note">Earlier checks created without an account stay on their original private links.</p></div></details>`);
       state.container.querySelector('#vaRefresh')?.addEventListener('click',()=>load(state));state.container.querySelector('#vaMore')?.addEventListener('click',()=>load(state,true));
       thumbnails(state);schedule(state);
     }catch(error){if(valid(state)&&run===state.run){shell(state,`${tabs(state)}<div class="va-panel" role="alert"><h2>Your verifications couldn’t load.</h2><p>${esc(error.name==='AbortError'?'The connection took too long. Try again.':error.message)}</p><button type="button" class="va-button" id="vaRetry">Try again</button></div>`);state.container.querySelector('#vaRetry')?.addEventListener('click',()=>load(state));}}
