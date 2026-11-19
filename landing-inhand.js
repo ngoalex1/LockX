@@ -113,7 +113,7 @@
       const header = document.createElement('header');
       header.id = 'lockxPublicHeader';
       header.className = 'lx-public-header';
-      header.innerHTML = `<nav class="lx-wrap" aria-label="LockX navigation"><a class="lx-wordmark" href="#landing" aria-label="LockX home">lock<span>x</span><small class="lx-brand-credit">OpenAI technology</small></a><div class="lx-header-links"><button type="button" data-home-scroll="lxHowItWorks">How it works</button><button type="button" data-home-scroll="lxQuestions">Questions</button></div><a class="lx-header-cta" href="#in-hand">Verify photos ${arrow}</a></nav>`;
+      header.innerHTML = `<nav class="lx-wrap" aria-label="LockX navigation"><a class="lx-wordmark" href="#landing" aria-label="LockX home">lock<span>x</span><small class="lx-brand-credit">OpenAI technology</small></a><div class="lx-header-links"><a class="va-header-link" href="#in-hand/account" data-verification-account>Your verifications <span data-verification-unread hidden></span></a></div><a class="lx-header-cta" href="#in-hand">Verify photos ${arrow}</a></nav>`;
       document.body.prepend(header);
     }
   }
