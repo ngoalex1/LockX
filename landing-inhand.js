@@ -57,7 +57,7 @@
   const markup = `
     <section id="landing" class="page landing-page lx-home lx-proof-home" aria-labelledby="lxHeroTitle">
       <section class="lx-proof-hero lx-wrap" aria-labelledby="lxHeroTitle">
-        <div class="lx-proof-intro"><p>A little proof goes a long way.</p><h1 id="lxHeroTitle">Real item.<br>Visible proof.</h1></div>
+        <div class="lx-proof-intro"><p>Third-party in-hand verification.</p><h1 id="lxHeroTitle">Real item.<br>Visible proof.</h1></div>
         <div class="lx-proof-art">
           <p class="lx-proof-art-label">Your item,<br>backed by video.</p>
           <figure class="lx-proof-example" aria-label="Illustrative example of a LockX verified Pokémon card photo">
@@ -78,6 +78,7 @@
           <p class="lx-proof-note">No app. Just photos and a 10-second video.</p>
         </div>
       </section>
+      <section class="lx-proof-why lx-wrap" aria-labelledby="lxWhyTitle"><h2 id="lxWhyTitle">Give buyers a reason<br>to choose you.</h2><div><p>LockX compares your listing photos with a fresh, 10-second video of the item in your hand.</p><p>Built to help reduce e-commerce scams and help you stand out in a crowded marketplace—with <strong>proof buyers can check.</strong></p></div></section>
       <details class="lx-proof-more lx-wrap"><summary>Credits &amp; questions <span aria-hidden="true">+</span></summary>
       <section class="lx-faq lx-section lx-wrap" id="lxQuestions" aria-labelledby="lxFAQTitle"><div class="lx-section-heading"><h2 id="lxFAQTitle">A few good questions.</h2></div><div class="lx-faq-list"><details><summary>What does In-hand Verified confirm?<span aria-hidden="true">+</span></summary><p>It checks whether your selected photos match the physical item shown in a newly recorded video. It does not establish brand authenticity, legal ownership, condition beyond what is visible, or a guarantee of a transaction.</p></details><details><summary>Do I need an app or a password?<span aria-hidden="true">+</span></summary><p>No app or password is needed. Buyers and sellers who start a check sign in with an email link to use their credits. A seller responding to a buyer’s paid request records free, without an account.</p></details><details><summary>How long does it take?<span aria-hidden="true">+</span></summary><p>The recording lasts 10 seconds and stops automatically. Upload and AI comparison follow; the total time depends on your connection, photos, and the evidence captured.</p></details><details><summary>How do I save the verified photos?<span aria-hidden="true">+</span></summary><p>Your approved images appear with QR codes even if another selected photo does not match. Only verified photos are included when saving. Tap the save button, then choose Save Images on iPhone or a supported save option on Android. Your phone asks you to confirm. Individual image saving is also available.</p></details></div></section>
 
